@@ -35,13 +35,10 @@ type Reservation = {
   guests: number;
   notes: string | null;
   status: "pending" | "confirmed" | "cancelled";
+  table_id: string | null;
+  seated_at: string | null;
+  completed_at: string | null;
 };
-
-type AssignmentRow = {
-  reservation_id: string;
-  table_id: string;
-};
-
 type TableView = RestaurantTable & {
   tableStatus: TableStatus;
   reservation: Reservation | null;
@@ -74,7 +71,6 @@ export default function TableMapPanel() {
 
   const [tables, setTables] = useState<RestaurantTable[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
 
   const [positions, setPositions] = useState<Record<string, Position>>(
     {}
@@ -108,8 +104,8 @@ export default function TableMapPanel() {
 
     const supabase = createClient();
 
-    const [tablesResult, reservationsResult, assignmentsResult] =
-      await Promise.all([
+    const [tablesResult, reservationsResult] =
+  await Promise.all([
         supabase
           .from("restaurant_tables")
           .select(
@@ -139,27 +135,25 @@ export default function TableMapPanel() {
               reservation_time,
               guests,
               notes,
-              status
+status,
+table_id,
+ seated_at,
+    completed_at
             `
           )
           .eq("reservation_date", selectedDate)
           .neq("status", "cancelled")
           .order("reservation_time", { ascending: true }),
 
-        supabase
-          .from("reservation_table_assignments")
-          .select("reservation_id, table_id"),
       ]);
 
     if (
       tablesResult.error ||
-      reservationsResult.error ||
-      assignmentsResult.error
+      reservationsResult.error
     ) {
       console.error({
         tablesError: tablesResult.error,
         reservationsError: reservationsResult.error,
-        assignmentsError: assignmentsResult.error,
       });
 
       setErrorMessage(
@@ -174,10 +168,6 @@ export default function TableMapPanel() {
 
     setReservations(
       (reservationsResult.data ?? []) as Reservation[]
-    );
-
-    setAssignments(
-      (assignmentsResult.data ?? []) as AssignmentRow[]
     );
 
     setPositions(createInitialPositions(loadedTables));
@@ -409,52 +399,117 @@ export default function TableMapPanel() {
 
     setSavingTableId(null);
   }
+  async function updateTableServiceState(
+  reservationId: string,
+  action: "seat" | "complete"
+) {
+  setErrorMessage("");
+  setSuccessMessage("");
+
+  const supabase = createClient();
+  const now = new Date().toISOString();
+
+  const updatePayload =
+    action === "seat"
+      ? {
+          seated_at: now,
+          completed_at: null,
+        }
+      : {
+          completed_at: now,
+        };
+
+  const { data, error } = await supabase
+    .from("reservation")
+    .update(updatePayload)
+    .eq("id", reservationId)
+    .select(
+      `
+        id,
+        customer_name,
+        customer_phone,
+        reservation_date,
+        reservation_time,
+        guests,
+        notes,
+        status,
+        table_id,
+        seated_at,
+        completed_at
+      `
+    )
+    .single();
+
+  if (error || !data) {
+    console.error(
+      "Errore aggiornamento stato tavolo:",
+      error
+    );
+
+    setErrorMessage(
+      action === "seat"
+        ? "Non è stato possibile segnare il cliente come arrivato."
+        : "Non è stato possibile liberare il tavolo."
+    );
+
+    return;
+  }
+
+  setReservations((current) =>
+    current.map((reservation) =>
+      reservation.id === reservationId
+        ? (data as Reservation)
+        : reservation
+    )
+  );
+
+  setSuccessMessage(
+    action === "seat"
+      ? "Cliente arrivato. Tavolo occupato."
+      : "Servizio completato. Tavolo liberato."
+  );
+
+  window.setTimeout(() => {
+    setSuccessMessage("");
+  }, 1800);
+}
 
   const tableViews = useMemo<TableView[]>(() => {
-    return tables.map((table) => {
-      if (!table.is_active) {
-        return {
-          ...table,
-          tableStatus: "inactive",
-          reservation: null,
-        };
-      }
-
-      const tableAssignments = assignments.filter(
-        (assignment) => assignment.table_id === table.id
-      );
-
-      const reservation =
-        reservations.find((item) => {
-          const hasAssignment = tableAssignments.some(
-            (assignment) =>
-              assignment.reservation_id === item.id
-          );
-
-          return (
-            hasAssignment &&
-            normalizeTime(item.reservation_time) === selectedTime
-          );
-        }) ?? null;
-
-      if (!reservation) {
-        return {
-          ...table,
-          tableStatus: "free",
-          reservation: null,
-        };
-      }
-
+  return tables.map((table) => {
+    if (!table.is_active) {
       return {
         ...table,
-        tableStatus:
-          reservation.status === "confirmed"
-            ? "occupied"
-            : "reserved",
-        reservation,
+        tableStatus: "inactive",
+        reservation: null,
       };
-    });
-  }, [tables, reservations, assignments, selectedTime]);
+    }
+
+    const reservation =
+      reservations.find(
+        (item) =>
+          item.table_id === table.id &&
+          normalizeTime(item.reservation_time) ===
+            selectedTime &&
+          !item.completed_at
+      ) ?? null;
+
+    if (!reservation) {
+      return {
+        ...table,
+        tableStatus: "free",
+        reservation: null,
+      };
+    }
+
+    return {
+      ...table,
+      tableStatus: reservation.seated_at
+        ? "occupied"
+        : "reserved",
+      reservation,
+    };
+  });
+}, [tables, reservations, selectedTime]);
 
   const groupedTables = useMemo(() => {
     const groups = new Map<string, TableView[]>();
@@ -780,8 +835,101 @@ export default function TableMapPanel() {
                       </strong>
                     </div>
                   )}
+                  <div className="table-map-reservation-actions">
+  {!selectedTable.reservation.seated_at && (
+    <button
+      type="button"
+      onClick={() =>
+        updateTableServiceState(
+          selectedTable.reservation!.id,
+          "seat"
+        )
+      }
+    >
+      Cliente arrivato
+    </button>
+  )}
+
+  {selectedTable.reservation.seated_at &&
+    !selectedTable.reservation.completed_at && (
+      <button
+        type="button"
+        className="complete"
+        onClick={() =>
+          updateTableServiceState(
+            selectedTable.reservation!.id,
+            "complete"
+          )
+        }
+      >
+        Libera tavolo
+      </button>
+    )}
+</div>
+<div className="table-map-timeline">
+  <h4>Timeline servizio</h4>
+
+  <div className="table-map-timeline-item">
+    <span className="dot active" />
+
+    <div>
+      <small>Prenotazione</small>
+      <strong>
+        {normalizeTime(
+          selectedTable.reservation.reservation_time
+        )}
+      </strong>
+    </div>
+  </div>
+
+  <div className="table-map-timeline-item">
+    <span
+      className={[
+        "dot",
+        selectedTable.reservation.seated_at
+          ? "active"
+          : "",
+      ].join(" ")}
+    />
+
+    <div>
+      <small>Cliente arrivato</small>
+      <strong>
+        {selectedTable.reservation.seated_at
+          ? formatDateTime(
+              selectedTable.reservation.seated_at
+            )
+          : "In attesa"}
+      </strong>
+    </div>
+  </div>
+
+  <div className="table-map-timeline-item">
+    <span
+      className={[
+        "dot",
+        selectedTable.reservation.completed_at
+          ? "active"
+          : "",
+      ].join(" ")}
+    />
+
+    <div>
+      <small>Tavolo liberato</small>
+      <strong>
+        {selectedTable.reservation.completed_at
+          ? formatDateTime(
+              selectedTable.reservation.completed_at
+            )
+          : "Non ancora"}
+      </strong>
+    </div>
+  </div>
+</div>
                 </div>
+                
               ) : (
+                
                 <div className="table-map-free-message">
                   Il tavolo è disponibile nell’orario selezionato.
                 </div>
@@ -1026,7 +1174,14 @@ function getShortTableName(name: string) {
 
   return number ?? name.slice(0, 3).toUpperCase();
 }
+function formatDateTime(value: string) {
+  if (!value) return "";
 
+  return new Date(value).toLocaleTimeString("it-IT", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(Math.max(value, minimum), maximum);
 }

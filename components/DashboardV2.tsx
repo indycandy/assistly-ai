@@ -38,6 +38,7 @@ type Reservation = {
   reservation_time: string;
   guests: number;
   status: ReservationStatus;
+  table_id: string | null;
 };
 
 type RestaurantTable = {
@@ -259,15 +260,16 @@ function DashboardHome({
           supabase
             .from("reservation")
             .select(
-              `
-                id,
-                customer_name,
-                reservation_date,
-                reservation_time,
-                guests,
-                status
-              `
-            )
+  `
+    id,
+    customer_name,
+    reservation_date,
+    reservation_time,
+    guests,
+    status,
+    table_id
+  `
+)
             .gte("reservation_date", today)
             .order("reservation_date", {
               ascending: true,
@@ -371,24 +373,61 @@ function DashboardHome({
   }, [reservations, tables, today]);
 
   const upcomingReservations = useMemo(() => {
-    return reservations
-      .filter(
-        (reservation) =>
-          reservation.status !== "cancelled"
-      )
-      .slice(0, 5);
-  }, [reservations]);
+  const now = new Date();
 
-  const occupationPercentage =
-    metrics.totalTables > 0
-      ? Math.round(
-          (metrics.todayReservations /
-            metrics.totalTables) *
-            100
+  return reservations
+    .filter((reservation) => {
+      if (reservation.status === "cancelled") return false;
+
+      const reservationDateTime = new Date(
+        `${reservation.reservation_date}T${reservation.reservation_time}`
+      );
+
+      return reservationDateTime >= now;
+    })
+    .sort((a, b) => {
+      const dateA = new Date(
+        `${a.reservation_date}T${a.reservation_time}`
+      ).getTime();
+
+      const dateB = new Date(
+        `${b.reservation_date}T${b.reservation_time}`
+      ).getTime();
+
+      return dateA - dateB;
+    })
+    .slice(0, 4);
+}, [reservations]);
+
+  const totalSeats = tables
+  .filter((table) => table.is_active)
+  .reduce(
+    (total, table) => total + Number(table.seats ?? 0),
+    0
+  );
+
+const occupationPercentage =
+
+  totalSeats > 0
+    ? Math.min(
+        100,
+        Math.round(
+          (metrics.todayGuests / totalSeats) * 100
         )
-      : 0;
+      )
+    : 0;
+    const remainingSeats = Math.max(
+  0,
+  totalSeats - metrics.todayGuests
+);
+
+const overCapacity = Math.max(
+  0,
+  metrics.todayGuests - totalSeats
+);
 
   return (
+    
     <div className="dashboard-v3-home">
       <section className="dashboard-v3-welcome">
         <div>
@@ -466,7 +505,7 @@ function DashboardHome({
               ? "—"
               : `${occupationPercentage}%`
           }
-          hint="Rapporto prenotazioni/tavoli"
+          hint={`${metrics.todayGuests} coperti su ${totalSeats} posti`}
         />
       </section>
 
@@ -596,24 +635,37 @@ function DashboardHome({
           </div>
 
           <div className="dashboard-v3-table-stats">
-            <TableStat
-              label="Attivi"
-              value={metrics.activeTables}
-              status="active"
-            />
+  <TableStat
+    label="Tavoli attivi"
+    value={metrics.activeTables}
+    status="active"
+  />
 
-            <TableStat
-              label="Disattivati"
-              value={metrics.inactiveTables}
-              status="inactive"
-            />
+  <TableStat
+    label="Posti sala"
+    value={totalSeats}
+    status="total"
+  />
 
-            <TableStat
-              label="Totali"
-              value={metrics.totalTables}
-              status="total"
-            />
-          </div>
+  <TableStat
+    label="Posti residui"
+    value={remainingSeats}
+    status={
+      remainingSeats > 0 ? "active" : "inactive"
+    }
+  />
+</div>
+
+{overCapacity > 0 && (
+  <div className="dashboard-v3-capacity-warning">
+    <strong>⚠ Capacità superata</strong>
+    <span>
+      Oggi risultano {metrics.todayGuests} coperti previsti
+      su {totalSeats} posti configurati. Mancano{" "}
+      {overCapacity} posti.
+    </span>
+  </div>
+)}
 
           <div className="dashboard-v3-table-preview">
             {tables.slice(0, 6).map((table) => (

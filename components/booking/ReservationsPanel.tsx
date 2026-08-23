@@ -14,7 +14,16 @@ type Reservation = {
   guests: number;
   notes: string | null;
   status: ReservationStatus;
+  table_id: string | null;
   created_at?: string;
+};
+
+type RestaurantTable = {
+  id: string;
+  table_name: string;
+  seats: number;
+  area: string;
+  is_active: boolean;
 };
 
 type StatusFilter = "all" | ReservationStatus;
@@ -38,6 +47,7 @@ function formatTime(value: string) {
 
 function isToday(value: string) {
   const today = new Date();
+
   const localToday = [
     today.getFullYear(),
     String(today.getMonth() + 1).padStart(2, "0"),
@@ -49,6 +59,7 @@ function isToday(value: string) {
 
 export default function ReservationsPanel() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [tables, setTables] = useState<RestaurantTable[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
@@ -73,6 +84,7 @@ export default function ReservationsPanel() {
           guests,
           notes,
           status,
+          table_id,
           created_at
         `
       )
@@ -88,6 +100,28 @@ export default function ReservationsPanel() {
     }
 
     setReservations((data ?? []) as Reservation[]);
+
+    const { data: tablesData, error: tablesError } = await supabase
+      .from("restaurant_tables")
+      .select(
+        `
+          id,
+          table_name,
+          seats,
+          area,
+          is_active
+        `
+      )
+      .eq("is_active", true)
+      .order("area", { ascending: true })
+      .order("table_name", { ascending: true });
+
+    if (tablesError) {
+      console.error("Errore caricamento tavoli:", tablesError);
+    } else {
+      setTables((tablesData ?? []) as RestaurantTable[]);
+    }
+
     setLoading(false);
   }, []);
 
@@ -147,6 +181,7 @@ export default function ReservationsPanel() {
           guests,
           notes,
           status,
+          table_id,
           created_at
         `
       )
@@ -172,7 +207,59 @@ export default function ReservationsPanel() {
     setActionId(null);
   }
 
-  async function deleteReservation(reservation: Reservation) {
+  async function updateTable(
+    reservationId: string,
+    tableId: string
+  ) {
+    setActionId(reservationId);
+    setErrorMessage("");
+
+    const supabase = createClient();
+    const value = tableId === "" ? null : tableId;
+
+    const { data, error } = await supabase
+      .from("reservation")
+      .update({ table_id: value })
+      .eq("id", reservationId)
+      .select(
+        `
+          id,
+          customer_name,
+          customer_phone,
+          reservation_date,
+          reservation_time,
+          guests,
+          notes,
+          status,
+          table_id,
+          created_at
+        `
+      )
+      .single();
+
+    if (error || !data) {
+      console.error("Errore assegnazione tavolo:", error);
+      setErrorMessage(
+        "Non è stato possibile assegnare il tavolo."
+      );
+      setActionId(null);
+      return;
+    }
+
+    setReservations((current) =>
+      current.map((reservation) =>
+        reservation.id === reservationId
+          ? (data as Reservation)
+          : reservation
+      )
+    );
+
+    setActionId(null);
+  }
+
+  async function deleteReservation(
+    reservation: Reservation
+  ) {
     const confirmed = window.confirm(
       `Vuoi eliminare definitivamente la prenotazione di ${reservation.customer_name}?`
     );
@@ -199,7 +286,9 @@ export default function ReservationsPanel() {
     }
 
     setReservations((current) =>
-      current.filter((item) => item.id !== reservation.id)
+      current.filter(
+        (item) => item.id !== reservation.id
+      )
     );
 
     setActionId(null);
@@ -243,6 +332,7 @@ export default function ReservationsPanel() {
 
         <div>
           <span>In attesa</span>
+
           <strong>
             {
               reservations.filter(
@@ -255,6 +345,7 @@ export default function ReservationsPanel() {
 
         <div>
           <span>Confermate</span>
+
           <strong>
             {
               reservations.filter(
@@ -291,7 +382,9 @@ export default function ReservationsPanel() {
       </div>
 
       {errorMessage && (
-        <div className="reservations-error">{errorMessage}</div>
+        <div className="reservations-error">
+          {errorMessage}
+        </div>
       )}
 
       {loading && (
@@ -300,160 +393,215 @@ export default function ReservationsPanel() {
         </div>
       )}
 
-      {!loading && filteredReservations.length === 0 && (
-        <div className="reservations-empty">
-          Nessuna prenotazione presente per questo filtro.
-        </div>
-      )}
+      {!loading &&
+        filteredReservations.length === 0 && (
+          <div className="reservations-empty">
+            Nessuna prenotazione presente per questo filtro.
+          </div>
+        )}
 
-      {!loading && filteredReservations.length > 0 && (
-        <div className="reservations-list">
-          {filteredReservations.map((reservation) => {
-            const isWorking = actionId === reservation.id;
+      {!loading &&
+        filteredReservations.length > 0 && (
+          <div className="reservations-list">
+            {filteredReservations.map(
+              (reservation) => {
+                const isWorking =
+                  actionId === reservation.id;
 
-            return (
-              <article
-                className={[
-                  "reservation-card",
-                  `reservation-${reservation.status}`,
-                ].join(" ")}
-                key={reservation.id}
-              >
-                <div className="reservation-date-column">
-                  <span>
-                    {isToday(reservation.reservation_date)
-                      ? "OGGI"
-                      : formatEuropeanDate(
+                return (
+                  <article
+                    className={[
+                      "reservation-card",
+                      `reservation-${reservation.status}`,
+                    ].join(" ")}
+                    key={reservation.id}
+                  >
+                    <div className="reservation-date-column">
+                      <span>
+                        {isToday(
                           reservation.reservation_date
-                        )}
-                  </span>
+                        )
+                          ? "OGGI"
+                          : formatEuropeanDate(
+                              reservation.reservation_date
+                            )}
+                      </span>
 
-                  <strong>
-                    {formatTime(reservation.reservation_time)}
-                  </strong>
-                </div>
-
-                <div className="reservation-details">
-                  <div className="reservation-title-row">
-                    <div>
-                      <h3>{reservation.customer_name}</h3>
-
-                      <p>
-                        {reservation.guests}{" "}
-                        {reservation.guests === 1
-                          ? "persona"
-                          : "persone"}
-                      </p>
-                    </div>
-
-                    <span
-                      className={`reservation-status status-${reservation.status}`}
-                    >
-                      {statusLabels[reservation.status]}
-                    </span>
-                  </div>
-
-                  <div className="reservation-information">
-                    <span>
-                      Data:{" "}
-                      <strong>
-                        {formatEuropeanDate(
-                          reservation.reservation_date
-                        )}
-                      </strong>
-                    </span>
-
-                    <span>
-                      Ora:{" "}
                       <strong>
                         {formatTime(
                           reservation.reservation_time
                         )}
                       </strong>
-                    </span>
-
-                    {reservation.customer_phone && (
-                      <span>
-                        Telefono:{" "}
-                        <strong>
-                          {reservation.customer_phone}
-                        </strong>
-                      </span>
-                    )}
-                  </div>
-
-                  {reservation.notes && (
-                    <div className="reservation-notes">
-                      <strong>Note:</strong> {reservation.notes}
                     </div>
-                  )}
 
-                  <div className="reservation-actions">
-                    {reservation.status !== "confirmed" && (
-                      <button
-                        type="button"
-                        className="reservation-confirm"
-                        disabled={isWorking}
-                        onClick={() =>
-                          updateStatus(
-                            reservation.id,
-                            "confirmed"
-                          )
-                        }
-                      >
-                        Conferma
-                      </button>
-                    )}
+                    <div className="reservation-details">
+                      <div className="reservation-title-row">
+                        <div>
+                          <h3>
+                            {reservation.customer_name}
+                          </h3>
 
-                    {reservation.status !== "cancelled" && (
-                      <button
-                        type="button"
-                        className="reservation-cancel"
-                        disabled={isWorking}
-                        onClick={() =>
-                          updateStatus(
-                            reservation.id,
-                            "cancelled"
-                          )
-                        }
-                      >
-                        Annulla
-                      </button>
-                    )}
+                          <p>
+                            {reservation.guests}{" "}
+                            {reservation.guests === 1
+                              ? "persona"
+                              : "persone"}
+                          </p>
+                        </div>
 
-                    {reservation.status === "cancelled" && (
-                      <button
-                        type="button"
-                        className="reservation-reopen"
-                        disabled={isWorking}
-                        onClick={() =>
-                          updateStatus(
-                            reservation.id,
-                            "pending"
-                          )
-                        }
-                      >
-                        Ripristina
-                      </button>
-                    )}
+                        <span
+                          className={`reservation-status status-${reservation.status}`}
+                        >
+                          {
+                            statusLabels[
+                              reservation.status
+                            ]
+                          }
+                        </span>
+                      </div>
 
-                    <button
-                      type="button"
-                      className="reservation-delete"
-                      disabled={isWorking}
-                      onClick={() =>
-                        deleteReservation(reservation)
-                      }
-                    >
-                      Elimina
-                    </button>
-                  </div>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
+                      <div className="reservation-information">
+                        <span>
+                          Data:{" "}
+                          <strong>
+                            {formatEuropeanDate(
+                              reservation.reservation_date
+                            )}
+                          </strong>
+                        </span>
+
+                        <span>
+                          Ora:{" "}
+                          <strong>
+                            {formatTime(
+                              reservation.reservation_time
+                            )}
+                          </strong>
+                        </span>
+
+                        {reservation.customer_phone && (
+                          <span>
+                            Telefono:{" "}
+                            <strong>
+                              {
+                                reservation.customer_phone
+                              }
+                            </strong>
+                          </span>
+                        )}
+
+                        <span className="reservation-table-select">
+                          Tavolo:{" "}
+
+                          <select
+                            value={
+                              reservation.table_id ?? ""
+                            }
+                            disabled={isWorking}
+                            onChange={(event) =>
+                              updateTable(
+                                reservation.id,
+                                event.target.value
+                              )
+                            }
+                          >
+                            <option value="">
+                              Non assegnato
+                            </option>
+
+                            {tables.map((table) => (
+                              <option
+                                key={table.id}
+                                value={table.id}
+                              >
+                                {table.table_name} ·{" "}
+                                {table.seats} posti ·{" "}
+                                {table.area}
+                              </option>
+                            ))}
+                          </select>
+                        </span>
+                      </div>
+
+                      {reservation.notes && (
+                        <div className="reservation-notes">
+                          <strong>Note:</strong>{" "}
+                          {reservation.notes}
+                        </div>
+                      )}
+
+                      <div className="reservation-actions">
+                        {reservation.status !==
+                          "confirmed" && (
+                          <button
+                            type="button"
+                            className="reservation-confirm"
+                            disabled={isWorking}
+                            onClick={() =>
+                              updateStatus(
+                                reservation.id,
+                                "confirmed"
+                              )
+                            }
+                          >
+                            Conferma
+                          </button>
+                        )}
+
+                        {reservation.status !==
+                          "cancelled" && (
+                          <button
+                            type="button"
+                            className="reservation-cancel"
+                            disabled={isWorking}
+                            onClick={() =>
+                              updateStatus(
+                                reservation.id,
+                                "cancelled"
+                              )
+                            }
+                          >
+                            Annulla
+                          </button>
+                        )}
+
+                        {reservation.status ===
+                          "cancelled" && (
+                          <button
+                            type="button"
+                            className="reservation-reopen"
+                            disabled={isWorking}
+                            onClick={() =>
+                              updateStatus(
+                                reservation.id,
+                                "pending"
+                              )
+                            }
+                          >
+                            Ripristina
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          className="reservation-delete"
+                          disabled={isWorking}
+                          onClick={() =>
+                            deleteReservation(
+                              reservation
+                            )
+                          }
+                        >
+                          Elimina
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              }
+            )}
+          </div>
+        )}
     </section>
   );
 }
