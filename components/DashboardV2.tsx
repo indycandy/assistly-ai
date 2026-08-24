@@ -39,6 +39,8 @@ type Reservation = {
   guests: number;
   status: ReservationStatus;
   table_id: string | null;
+  seated_at: string | null;
+  completed_at: string | null;
 };
 
 type RestaurantTable = {
@@ -56,6 +58,10 @@ type DashboardMetrics = {
   activeTables: number;
   inactiveTables: number;
   totalTables: number;
+  reservedTables: number;
+  occupiedTables: number;
+  freeTables: number;
+  arrivedGuests: number;
 };
 
 const pageLabels: Record<DashboardPage, string> = {
@@ -260,16 +266,18 @@ function DashboardHome({
           supabase
             .from("reservation")
             .select(
-  `
-    id,
-    customer_name,
-    reservation_date,
-    reservation_time,
-    guests,
-    status,
-    table_id
-  `
-)
+              `
+                id,
+                customer_name,
+                reservation_date,
+                reservation_time,
+                guests,
+                status,
+                table_id,
+                seated_at,
+                completed_at
+              `
+            )
             .gte("reservation_date", today)
             .order("reservation_date", {
               ascending: true,
@@ -338,15 +346,70 @@ function DashboardHome({
   const today = getLocalDateValue(new Date());
 
   const metrics = useMemo<DashboardMetrics>(() => {
-    const todayReservations =
-      reservations.filter(
-        (reservation) =>
-          reservation.reservation_date === today &&
-          reservation.status !== "cancelled"
-      );
+    const todayReservations = reservations.filter(
+      (reservation) =>
+        reservation.reservation_date === today &&
+        reservation.status !== "cancelled"
+    );
+
+    const activeTableIds = new Set(
+      tables
+        .filter((table) => table.is_active)
+        .map((table) => table.id)
+    );
+
+    const occupiedTableIds = new Set(
+      todayReservations
+        .filter(
+          (reservation) =>
+            reservation.table_id &&
+            activeTableIds.has(reservation.table_id) &&
+            reservation.seated_at &&
+            !reservation.completed_at
+        )
+        .map(
+          (reservation) =>
+            reservation.table_id as string
+        )
+    );
+
+    const reservedTableIds = new Set(
+      todayReservations
+        .filter(
+          (reservation) =>
+            reservation.table_id &&
+            activeTableIds.has(reservation.table_id) &&
+            !reservation.seated_at &&
+            !reservation.completed_at
+        )
+        .map(
+          (reservation) =>
+            reservation.table_id as string
+        )
+    );
+
+    const activeTables = activeTableIds.size;
+
+    const occupiedTables =
+      occupiedTableIds.size;
+
+    const reservedTables = Array.from(
+      reservedTableIds
+    ).filter(
+      (tableId) =>
+        !occupiedTableIds.has(tableId)
+    ).length;
+
+    const freeTables = Math.max(
+      0,
+      activeTables -
+        occupiedTables -
+        reservedTables
+    );
 
     return {
-      todayReservations: todayReservations.length,
+      todayReservations:
+        todayReservations.length,
 
       todayGuests: todayReservations.reduce(
         (total, reservation) =>
@@ -357,77 +420,101 @@ function DashboardHome({
 
       pendingReservations: reservations.filter(
         (reservation) =>
-          reservation.status === "pending"
+          reservation.status === "pending" &&
+          reservation.reservation_date === today
       ).length,
 
-      activeTables: tables.filter(
-        (table) => table.is_active
-      ).length,
+      activeTables,
 
       inactiveTables: tables.filter(
         (table) => !table.is_active
       ).length,
 
       totalTables: tables.length,
+
+      reservedTables,
+
+      occupiedTables,
+
+      freeTables,
+
+      arrivedGuests: todayReservations
+        .filter(
+          (reservation) =>
+            reservation.seated_at
+        )
+        .reduce(
+          (total, reservation) =>
+            total +
+            Number(reservation.guests ?? 0),
+          0
+        ),
     };
   }, [reservations, tables, today]);
 
   const upcomingReservations = useMemo(() => {
-  const now = new Date();
+    const now = new Date();
 
-  return reservations
-    .filter((reservation) => {
-      if (reservation.status === "cancelled") return false;
+    return reservations
+      .filter((reservation) => {
+        if (
+          reservation.status === "cancelled"
+        ) {
+          return false;
+        }
 
-      const reservationDateTime = new Date(
-        `${reservation.reservation_date}T${reservation.reservation_time}`
-      );
+        if (reservation.completed_at) {
+          return false;
+        }
 
-      return reservationDateTime >= now;
-    })
-    .sort((a, b) => {
-      const dateA = new Date(
-        `${a.reservation_date}T${a.reservation_time}`
-      ).getTime();
+        const reservationDateTime =
+          new Date(
+            `${reservation.reservation_date}T${reservation.reservation_time}`
+          );
 
-      const dateB = new Date(
-        `${b.reservation_date}T${b.reservation_time}`
-      ).getTime();
+        return reservationDateTime >= now;
+      })
+      .sort((a, b) => {
+        const dateA = new Date(
+          `${a.reservation_date}T${a.reservation_time}`
+        ).getTime();
 
-      return dateA - dateB;
-    })
-    .slice(0, 4);
-}, [reservations]);
+        const dateB = new Date(
+          `${b.reservation_date}T${b.reservation_time}`
+        ).getTime();
+
+        return dateA - dateB;
+      })
+      .slice(0, 4);
+  }, [reservations]);
 
   const totalSeats = tables
-  .filter((table) => table.is_active)
-  .reduce(
-    (total, table) => total + Number(table.seats ?? 0),
-    0
+    .filter((table) => table.is_active)
+    .reduce(
+      (total, table) =>
+        total +
+        Number(table.seats ?? 0),
+      0
+    );
+
+  const occupationPercentage =
+    totalSeats > 0
+      ? Math.min(
+          100,
+          Math.round(
+            (metrics.todayGuests /
+              totalSeats) *
+              100
+          )
+        )
+      : 0;
+
+  const overCapacity = Math.max(
+    0,
+    metrics.todayGuests - totalSeats
   );
 
-const occupationPercentage =
-
-  totalSeats > 0
-    ? Math.min(
-        100,
-        Math.round(
-          (metrics.todayGuests / totalSeats) * 100
-        )
-      )
-    : 0;
-    const remainingSeats = Math.max(
-  0,
-  totalSeats - metrics.todayGuests
-);
-
-const overCapacity = Math.max(
-  0,
-  metrics.todayGuests - totalSeats
-);
-
   return (
-    
     <div className="dashboard-v3-home">
       <section className="dashboard-v3-welcome">
         <div>
@@ -468,38 +555,64 @@ const overCapacity = Math.max(
           value={
             loading
               ? "—"
-              : String(metrics.todayReservations)
+              : String(
+                  metrics.todayReservations
+                )
           }
           hint="Escluse le annullate"
-          trend="+12%"
         />
 
         <KpiCard
           icon="◉"
-          label="Coperti oggi"
+          label="Coperti previsti"
           value={
             loading
               ? "—"
               : String(metrics.todayGuests)
           }
-          hint="Persone previste"
-          trend="+8%"
+          hint={`${metrics.arrivedGuests} già arrivati`}
         />
 
         <KpiCard
           icon="⌑"
-          label="Tavoli attivi"
+          label="Tavoli prenotati"
           value={
             loading
               ? "—"
-              : String(metrics.activeTables)
+              : String(
+                  metrics.reservedTables
+                )
           }
-          hint={`${metrics.totalTables} configurati`}
+          hint="Assegnati e non ancora occupati"
+        />
+
+        <KpiCard
+          icon="●"
+          label="Tavoli occupati"
+          value={
+            loading
+              ? "—"
+              : String(
+                  metrics.occupiedTables
+                )
+          }
+          hint="Clienti attualmente seduti"
+        />
+
+        <KpiCard
+          icon="○"
+          label="Tavoli liberi"
+          value={
+            loading
+              ? "—"
+              : String(metrics.freeTables)
+          }
+          hint={`${metrics.activeTables} tavoli attivi`}
         />
 
         <KpiCard
           icon="◌"
-          label="Occupazione"
+          label="Occupazione posti"
           value={
             loading
               ? "—"
@@ -532,7 +645,8 @@ const overCapacity = Math.max(
           )}
 
           {!loading &&
-            upcomingReservations.length === 0 && (
+            upcomingReservations.length ===
+              0 && (
               <EmptyState text="Nessuna prenotazione futura." />
             )}
 
@@ -562,7 +676,9 @@ const overCapacity = Math.max(
 
                       <div className="dashboard-v3-arrival-person">
                         <strong>
-                          {reservation.customer_name}
+                          {
+                            reservation.customer_name
+                          }
                         </strong>
 
                         <span>
@@ -591,7 +707,9 @@ const overCapacity = Math.max(
         </section>
 
         <section className="dashboard-v3-card dashboard-v3-ai-card">
-          <div className="dashboard-v3-ai-icon">✦</div>
+          <div className="dashboard-v3-ai-icon">
+            ✦
+          </div>
 
           <span>ASSISTLY AI</span>
 
@@ -602,7 +720,13 @@ const overCapacity = Math.max(
             <strong>
               {metrics.pendingReservations}
             </strong>{" "}
-            prenotazioni ancora da confermare.
+            prenotazioni da confermare,{" "}
+            <strong>
+              {metrics.occupiedTables}
+            </strong>{" "}
+            tavoli occupati e{" "}
+            <strong>{metrics.freeTables}</strong>{" "}
+            tavoli liberi.
           </p>
 
           <button
@@ -635,60 +759,103 @@ const overCapacity = Math.max(
           </div>
 
           <div className="dashboard-v3-table-stats">
-  <TableStat
-    label="Tavoli attivi"
-    value={metrics.activeTables}
-    status="active"
-  />
+            <TableStat
+              label="Liberi"
+              value={metrics.freeTables}
+              status="active"
+            />
 
-  <TableStat
-    label="Posti sala"
-    value={totalSeats}
-    status="total"
-  />
+            <TableStat
+              label="Prenotati"
+              value={
+                metrics.reservedTables
+              }
+              status="total"
+            />
 
-  <TableStat
-    label="Posti residui"
-    value={remainingSeats}
-    status={
-      remainingSeats > 0 ? "active" : "inactive"
-    }
-  />
-</div>
+            <TableStat
+              label="Occupati"
+              value={
+                metrics.occupiedTables
+              }
+              status={
+                metrics.occupiedTables > 0
+                  ? "inactive"
+                  : "active"
+              }
+            />
+          </div>
 
-{overCapacity > 0 && (
-  <div className="dashboard-v3-capacity-warning">
-    <strong>⚠ Capacità superata</strong>
-    <span>
-      Oggi risultano {metrics.todayGuests} coperti previsti
-      su {totalSeats} posti configurati. Mancano{" "}
-      {overCapacity} posti.
-    </span>
-  </div>
-)}
+          {overCapacity > 0 && (
+            <div className="dashboard-v3-capacity-warning">
+              <strong>
+                ⚠ Capacità superata
+              </strong>
+
+              <span>
+                Oggi risultano{" "}
+                {metrics.todayGuests} coperti
+                previsti su {totalSeats} posti
+                configurati. Mancano{" "}
+                {overCapacity} posti.
+              </span>
+            </div>
+          )}
 
           <div className="dashboard-v3-table-preview">
-            {tables.slice(0, 6).map((table) => (
-              <div key={table.id}>
-                <span
-                  className={
-                    table.is_active
-                      ? "active"
-                      : "inactive"
-                  }
-                />
+            {tables
+              .slice(0, 6)
+              .map((table) => {
+                const activeReservation =
+                  reservations.find(
+                    (reservation) =>
+                      reservation.reservation_date ===
+                        today &&
+                      reservation.table_id ===
+                        table.id &&
+                      reservation.status !==
+                        "cancelled" &&
+                      !reservation.completed_at
+                  );
 
-                <div>
-                  <strong>
-                    {table.table_name}
-                  </strong>
+                const liveStatus =
+                  !table.is_active
+                    ? "inactive"
+                    : activeReservation?.seated_at
+                      ? "occupied"
+                      : activeReservation
+                        ? "reserved"
+                        : "active";
 
-                  <small>
-                    {table.seats} posti · {table.area}
-                  </small>
-                </div>
-              </div>
-            ))}
+                const liveLabel =
+                  !table.is_active
+                    ? "Fuori servizio"
+                    : activeReservation?.seated_at
+                      ? "Occupato"
+                      : activeReservation
+                        ? "Prenotato"
+                        : "Libero";
+
+                return (
+                  <div key={table.id}>
+                    <span
+                      className={liveStatus}
+                    />
+
+                    <div>
+                      <strong>
+                        {table.table_name}
+                      </strong>
+
+                      <small>
+                        {table.seats} posti ·{" "}
+                        {table.area} ·{" "}
+                        {liveLabel}
+                      </small>
+                    </div>
+                  </div>
+                );
+              })}
           </div>
         </section>
 
@@ -784,10 +951,15 @@ function TableStat({
 }: {
   label: string;
   value: number;
-  status: "active" | "inactive" | "total";
+  status:
+    | "active"
+    | "inactive"
+    | "total";
 }) {
   return (
-    <div className={`dashboard-v3-table-stat ${status}`}>
+    <div
+      className={`dashboard-v3-table-stat ${status}`}
+    >
       <span />
       <strong>{value}</strong>
       <small>{label}</small>
@@ -853,10 +1025,9 @@ function getLocalDateValue(value: Date) {
     value.getMonth() + 1
   ).padStart(2, "0");
 
-  const day = String(value.getDate()).padStart(
-    2,
-    "0"
-  );
+  const day = String(
+    value.getDate()
+  ).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
 }
@@ -864,7 +1035,8 @@ function getLocalDateValue(value: Date) {
 function formatEuropeanDate(value: string) {
   if (!value) return "";
 
-  const [year, month, day] = value.split("-");
+  const [year, month, day] =
+    value.split("-");
 
   return `${day}/${month}/${year}`;
 }
