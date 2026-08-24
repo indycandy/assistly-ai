@@ -513,6 +513,83 @@ function DashboardHome({
     0,
     metrics.todayGuests - totalSeats
   );
+  const liveOperations = useMemo(() => {
+  const now = new Date();
+
+  const next60Minutes = reservations
+    .filter((reservation) => {
+      if (
+        reservation.reservation_date !== today ||
+        reservation.status === "cancelled" ||
+        reservation.completed_at ||
+        reservation.seated_at
+      ) {
+        return false;
+      }
+
+      const reservationDateTime = new Date(
+        `${reservation.reservation_date}T${reservation.reservation_time}`
+      );
+
+      const differenceMinutes =
+        (reservationDateTime.getTime() - now.getTime()) /
+        60000;
+
+      return (
+        differenceMinutes >= 0 &&
+        differenceMinutes <= 60
+      );
+    })
+    .sort((a, b) =>
+      a.reservation_time.localeCompare(
+        b.reservation_time
+      )
+    );
+
+  const occupiedNow = reservations.filter(
+    (reservation) =>
+      reservation.reservation_date === today &&
+      reservation.status !== "cancelled" &&
+      reservation.seated_at &&
+      !reservation.completed_at
+  );
+
+  const waitingForArrival = reservations.filter(
+    (reservation) =>
+      reservation.reservation_date === today &&
+      reservation.status !== "cancelled" &&
+      reservation.table_id &&
+      !reservation.seated_at &&
+      !reservation.completed_at
+  );
+
+  const conflicts = next60Minutes.filter(
+    (incomingReservation) => {
+      if (!incomingReservation.table_id) {
+        return false;
+      }
+
+      return occupiedNow.some(
+        (occupiedReservation) =>
+          occupiedReservation.table_id ===
+          incomingReservation.table_id
+      );
+    }
+  );
+const tableNameById = new Map(
+  tables.map((table) => [
+    table.id,
+    table.table_name,
+  ])
+);
+  return {
+    next60Minutes,
+    occupiedNow,
+    waitingForArrival,
+    conflicts,
+    tableNameById,
+  };
+}, [reservations, today]);
 
   return (
     <div className="dashboard-v3-home">
@@ -739,7 +816,143 @@ function DashboardHome({
           </button>
         </section>
       </div>
+<section className="dashboard-v3-card dashboard-v3-live-operations">
+  <div className="dashboard-v3-card-header">
+    <div>
+      <span>SALA LIVE</span>
+      <h3>Priorità operative</h3>
+    </div>
 
+    <button
+      type="button"
+      onClick={() =>
+        onNavigate("mappa-tavoli")
+      }
+    >
+      Gestisci sala
+    </button>
+  </div>
+
+  <div className="dashboard-v3-live-summary">
+    <div>
+      <strong>
+        
+        {liveOperations.next60Minutes.length}
+      </strong>
+      <span>Arrivi entro 60 min</span>
+    </div>
+
+    <div>
+      <strong>
+        {liveOperations.occupiedNow.length}
+      </strong>
+      <span>Occupati adesso</span>
+    </div>
+
+    <div>
+      <strong>
+        {liveOperations.waitingForArrival.length}
+      </strong>
+      <span>In attesa</span>
+    </div>
+
+    <div
+      className={
+        liveOperations.conflicts.length > 0
+          ? "warning"
+          : ""
+      }
+    >
+      <strong>
+        {liveOperations.conflicts.length}
+      </strong>
+      <span>Possibili conflitti</span>
+    </div>
+  </div>
+
+  <div className="dashboard-v3-live-list">
+    {liveOperations.conflicts.length > 0 &&
+      liveOperations.conflicts.map(
+        (reservation) => (
+          <div
+            key={`conflict-${reservation.id}`}
+            className="dashboard-v3-live-alert danger"
+          >
+            <span>⚠</span>
+
+            <div>
+              <strong>
+                Tavolo da liberare
+              </strong>
+
+              <small>
+  {reservation.customer_name} arriva alle{" "}
+  {reservation.reservation_time.slice(0, 5)}
+  {" · "}
+  {reservation.table_id
+    ? liveOperations.tableNameById.get(
+        reservation.table_id
+      ) ?? "Tavolo assegnato"
+    : "Tavolo da assegnare"}
+</small>
+            </div>
+          </div>
+        )
+      )}
+
+    {liveOperations.next60Minutes
+      .filter(
+        (reservation) =>
+          !liveOperations.conflicts.some(
+            (conflict) =>
+              conflict.id === reservation.id
+          )
+      )
+      .slice(0, 4)
+      .map((reservation) => (
+        <div
+          key={`arrival-${reservation.id}`}
+          className="dashboard-v3-live-alert"
+        >
+          <span>⌚</span>
+
+          <div>
+            <strong>
+              {reservation.customer_name}
+            </strong>
+
+            <small>
+              Arrivo alle{" "}
+              {reservation.reservation_time.slice(
+                0,
+                5
+              )}{" "}
+              · {reservation.guests}{" "}
+              {reservation.guests === 1
+                ? "persona"
+                : "persone"}
+              {reservation.table_id
+  ? ` · ${
+      liveOperations.tableNameById.get(
+        reservation.table_id
+      ) ?? "Tavolo assegnato"
+    }`
+  : " · Tavolo da assegnare"}
+            </small>
+          </div>
+        </div>
+      ))}
+
+    {liveOperations.next60Minutes.length ===
+      0 &&
+      liveOperations.conflicts.length === 0 && (
+        <div className="dashboard-v3-live-empty">
+          Nessuna priorità urgente nei prossimi
+          60 minuti.
+        </div>
+      )}
+  </div>
+</section>
       <div className="dashboard-v3-secondary-grid">
         <section className="dashboard-v3-card">
           <div className="dashboard-v3-card-header">

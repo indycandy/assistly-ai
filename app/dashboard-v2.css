@@ -2580,3 +2580,130 @@
 .table-map-timeline-item:last-child {
   border-bottom: 0;
 }
+.dashboard-v3-live-operations {
+  margin-bottom: 20px;
+}
+
+.dashboard-v3-live-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.dashboard-v3-live-summary > div {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.dashboard-v3-live-summary > div.warning {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.dashboard-v3-live-summary strong {
+  display: block;
+  font-size: 24px;
+  font-weight: 900;
+  color: #111827;
+}
+
+.dashboard-v3-live-summary span {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.dashboard-v3-live-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashboard-v3-live-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+}
+
+.dashboard-v3-live-alert > span {
+  font-size: 18px;
+}
+
+.dashboard-v3-live-alert strong,
+.dashboard-v3-live-alert small {
+  display: block;
+}
+
+.dashboard-v3-live-alert strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.dashboard-v3-live-alert small {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.dashboard-v3-live-alert.danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.dashboard-v3-live-alert.danger strong {
+  color: #b91c1c;
+}
+
+.dashboard-v3-live-empty {
+  padding: 18px;
+  text-align: center;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .dashboard-v3-live-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+/* Stati reali tavoli Dashboard */
+
+.dashboard-v3-table-preview > div > span.reserved {
+  background: #f59e0b;
+}
+
+.dashboard-v3-table-preview > div > span.occupied {
+  background: #ef4444;
+}
+
+.dashboard-v3-table-preview > div > span.active {
+  background: #22c55e;
+}
+
+.dashboard-v3-table-preview > div > span.inactive {
+  background: #94a3b8;
+}
+
+/* Contatori Sala Live */
+
+.dashboard-v3-table-stat.reserved > span {
+  background: #f59e0b;
+}
+
+.dashboard-v3-table-stat.occupied > span {
+  background: #ef4444;
+}
+
+.dashboard-v3-table-stat.free > span {
+  background: #22c55e;
+}
