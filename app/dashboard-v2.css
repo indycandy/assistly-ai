@@ -2707,3 +2707,178 @@
 .dashboard-v3-table-stat.free > span {
   background: #22c55e;
 }
+.dashboard-v3-live-alert.occupied {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.dashboard-v3-live-alert.occupied > span {
+  color: #ef4444;
+}
+
+.dashboard-v3-live-alert.occupied strong {
+  color: #b91c1c;
+}
+.dashboard-v3-live-alert.overtime {
+  background: #fff7ed;
+  border-color: #fdba74;
+}
+
+.dashboard-v3-live-alert.overtime > span {
+  color: #ea580c;
+}
+
+.dashboard-v3-live-alert.overtime strong {
+  color: #c2410c;
+}
+.dashboard-v3-live-alert.urgent {
+  background: #fef2f2;
+  border-color: #ef4444;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.08);
+}
+
+.dashboard-v3-live-alert.urgent strong {
+  color: #b91c1c;
+}
+.dashboard-v3-live-alert.urgent {
+  background: #fef2f2;
+  border-color: #ef4444;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.08);
+}
+
+.dashboard-v3-live-alert.urgent strong {
+  color: #b91c1c;
+}
+.dashboard-v3-service-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.dashboard-v3-service-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.04);
+}
+
+.dashboard-v3-service-card > div {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.dashboard-v3-service-card > div > span {
+  font-size: 25px;
+}
+
+.dashboard-v3-service-card small,
+.dashboard-v3-service-card strong {
+  display: block;
+}
+
+.dashboard-v3-service-card small {
+  margin-bottom: 4px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.dashboard-v3-service-card strong {
+  color: #111827;
+  font-size: 15px;
+}
+
+.dashboard-v3-service-card b {
+  color: #7546e8;
+  font-size: 19px;
+}
+
+@media (max-width: 760px) {
+  .dashboard-v3-service-summary {
+    grid-template-columns: 1fr;
+  }
+}
+.dashboard-v3-table-stat.free > span {
+  background: #22c55e;
+}
+
+.dashboard-v3-table-stat.reserved > span {
+  background: #f59e0b;
+}
+
+.dashboard-v3-table-stat.occupied > span {
+  background: #ef4444;
+}
+/* ========================================
+   STATO TAVOLI - BARRE PERCENTUALI
+======================================== */
+
+.dashboard-v3-table-progress {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
+.dashboard-v3-table-progress > div {
+  display: block;
+}
+
+.dashboard-v3-table-progress > div > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+}
+
+.dashboard-v3-table-progress > div > span strong {
+  display: block;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dashboard-v3-table-progress > div > span small {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dashboard-v3-table-progress > div > div {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e9eef5;
+}
+
+.dashboard-v3-table-progress i {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.dashboard-v3-table-progress i.free {
+  background: #22c55e;
+}
+
+.dashboard-v3-table-progress i.reserved {
+  background: #f59e0b;
+}
+
+.dashboard-v3-table-progress i.occupied {
+  background: #ef4444;
+}
