@@ -16,6 +16,36 @@ const supabaseAdmin = createClient(
 
 type Service = "pranzo" | "cena";
 
+type AtomicReservationResult = {
+  ok: boolean;
+
+  reason?: string;
+  message?: string;
+
+  reservation?: {
+    id: string;
+    customer_name: string;
+    customer_phone: string | null;
+    reservation_date: string;
+    reservation_time: string;
+    guests: number;
+    notes: string | null;
+    status: string;
+    table_id: string | null;
+  };
+
+  table?: {
+    id: string;
+    name: string;
+    seats: number;
+    area: string | null;
+  };
+
+  maxGuests?: number;
+  alreadyBookedGuests?: number;
+  remainingGuests?: number;
+};
+
 function generateSlots(
   startTime: string,
   endTime: string,
@@ -31,37 +61,59 @@ function generateSlots(
     .split(":")
     .map(Number);
 
-  let current = startHour * 60 + startMinute;
-  let end = endHour * 60 + endMinute;
+  let current =
+    startHour * 60 + startMinute;
+
+  let end =
+    endHour * 60 + endMinute;
 
   if (end <= current) {
     end += 24 * 60;
   }
 
   while (current < end) {
-    const normalized = current % (24 * 60);
+    const normalized =
+      current % (24 * 60);
 
-    const hour = Math.floor(normalized / 60)
+    const hour = Math.floor(
+      normalized / 60
+    )
       .toString()
       .padStart(2, "0");
 
-    const minute = (normalized % 60)
+    const minute = (
+      normalized % 60
+    )
       .toString()
       .padStart(2, "0");
 
-    slots.push(`${hour}:${minute}`);
+    slots.push(
+      `${hour}:${minute}`
+    );
+
     current += slotMinutes;
   }
 
   return slots;
 }
 
-export async function POST(request: Request) {
+export async function POST(
+  request: Request
+) {
   try {
-    const body = await request.json();
+    /*
+     * -----------------------------------------
+     * 1. DATI RICEVUTI
+     * -----------------------------------------
+     */
+
+    const body =
+      await request.json();
 
     const companyId =
-      typeof body.companyId === "string" ? body.companyId : "";
+      typeof body.companyId === "string"
+        ? body.companyId
+        : "";
 
     const customerName =
       typeof body.customerName === "string"
@@ -89,10 +141,21 @@ export async function POST(request: Request) {
         : "";
 
     const notes =
-      typeof body.notes === "string" ? body.notes.trim() : "";
+      typeof body.notes === "string"
+        ? body.notes.trim()
+        : "";
 
-    const service = body.service as Service;
-    const guests = Number(body.guests);
+    const service =
+      body.service as Service;
+
+    const guests =
+      Number(body.guests);
+
+    /*
+     * -----------------------------------------
+     * 2. VALIDAZIONE
+     * -----------------------------------------
+     */
 
     if (
       !companyId ||
@@ -103,37 +166,181 @@ export async function POST(request: Request) {
       !["pranzo", "cena"].includes(service) ||
       !Number.isInteger(guests) ||
       guests < 1 ||
-      guests > 20
+      guests > 999
     ) {
       return NextResponse.json(
-        { error: "Dati della prenotazione non validi" },
-        { status: 400 }
+        {
+          error:
+            "Dati della prenotazione non validi",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
-    const selectedDate = new Date(
-      `${reservationDate}T12:00:00`
-    );
+    /*
+     * -----------------------------------------
+     * 3. IMPOSTAZIONI RISTORANTE
+     * -----------------------------------------
+     */
 
-    if (Number.isNaN(selectedDate.getTime())) {
+    const {
+      data: restaurantSettings,
+      error: restaurantSettingsError,
+    } = await supabaseAdmin
+      .from("restaurant_settings")
+      .select(`
+        restaurant_name,
+        phone,
+        table_duration_minutes,
+        max_guests_per_reservation
+      `)
+      .eq(
+        "company_id",
+        companyId
+      )
+      .maybeSingle();
+
+    if (restaurantSettingsError) {
+      console.error(
+        "Errore impostazioni ristorante:",
+        restaurantSettingsError
+      );
+
       return NextResponse.json(
-        { error: "Data non valida" },
-        { status: 400 }
+        {
+          error:
+            "Impossibile verificare le impostazioni del ristorante",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
-    const selectedDay = selectedDate.getDay();
+    const restaurantName =
+      restaurantSettings
+        ?.restaurant_name ??
+      null;
 
-    const { data: availability, error: availabilityError } =
-      await supabaseAdmin
-        .from("reservation_availability")
-        .select("start_time, end_time, slot_minutes")
-        .eq("company_id", companyId)
-        .eq("day_of_week", selectedDay)
-        .eq("service", service)
-        .eq("is_active", true)
-        .limit(1)
-        .maybeSingle();
+    const restaurantPhone =
+      restaurantSettings
+        ?.phone ??
+      null;
+
+    const tableDurationMinutes =
+      Number(
+        restaurantSettings
+          ?.table_duration_minutes ??
+          120
+      );
+
+    const maxGuestsPerReservation =
+      Number(
+        restaurantSettings
+          ?.max_guests_per_reservation ??
+          10
+      );
+
+    /*
+     * -----------------------------------------
+     * 4. LIMITE PRENOTAZIONE ONLINE
+     * -----------------------------------------
+     */
+
+    if (
+      guests >
+      maxGuestsPerReservation
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            restaurantPhone
+              ? `Per prenotazioni superiori a ${maxGuestsPerReservation} persone contatta direttamente il locale al ${restaurantPhone}.`
+              : `Per prenotazioni superiori a ${maxGuestsPerReservation} persone contatta direttamente il locale.`,
+
+          requiresContact: true,
+
+          phone:
+            restaurantPhone,
+
+          restaurantName,
+
+          maxGuestsPerReservation,
+        },
+        {
+          status: 409,
+        }
+      );
+    }
+
+    /*
+     * -----------------------------------------
+     * 5. CONTROLLO DATA
+     * -----------------------------------------
+     */
+
+    const selectedDate =
+      new Date(
+        `${reservationDate}T12:00:00`
+      );
+
+    if (
+      Number.isNaN(
+        selectedDate.getTime()
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Data non valida",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const selectedDay =
+      selectedDate.getDay();
+
+    /*
+     * -----------------------------------------
+     * 6. CONTROLLO APERTURA E SERVIZIO
+     * -----------------------------------------
+     */
+
+    const {
+      data: availability,
+      error: availabilityError,
+    } = await supabaseAdmin
+      .from(
+        "reservation_availability"
+      )
+      .select(`
+        start_time,
+        end_time,
+        slot_minutes
+      `)
+      .eq(
+        "company_id",
+        companyId
+      )
+      .eq(
+        "day_of_week",
+        selectedDay
+      )
+      .eq(
+        "service",
+        service
+      )
+      .eq(
+        "is_active",
+        true
+      )
+      .limit(1)
+      .maybeSingle();
 
     if (availabilityError) {
       console.error(
@@ -142,8 +349,13 @@ export async function POST(request: Request) {
       );
 
       return NextResponse.json(
-        { error: "Impossibile verificare la disponibilità" },
-        { status: 500 }
+        {
+          error:
+            "Impossibile verificare la disponibilità",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
@@ -153,136 +365,309 @@ export async function POST(request: Request) {
           error:
             "Il ristorante non è disponibile nella data selezionata",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    const validSlots = generateSlots(
-      availability.start_time,
-      availability.end_time,
-      Number(availability.slot_minutes)
-    );
+    /*
+     * -----------------------------------------
+     * 7. CONTROLLO CHE L'ORARIO SIA VALIDO
+     * -----------------------------------------
+     */
 
-    if (!validSlots.includes(reservationTime)) {
-      return NextResponse.json(
-        { error: "L’orario selezionato non è valido" },
-        { status: 400 }
-      );
-    }
-
-    const { data: capacity, error: capacityError } =
-      await supabaseAdmin
-        .from("reservation_capacity")
-        .select("max_guests")
-        .eq("company_id", companyId)
-        .eq("day_of_week", selectedDay)
-        .eq("is_active", true)
-        .limit(1)
-        .maybeSingle();
-
-    if (capacityError) {
-      console.error(
-        "Errore controllo capienza:",
-        capacityError
+    const validSlots =
+      generateSlots(
+        availability.start_time,
+        availability.end_time,
+        Number(
+          availability.slot_minutes
+        )
       );
 
-      return NextResponse.json(
-        { error: "Impossibile verificare la capienza" },
-        { status: 500 }
-      );
-    }
-
-    if (!capacity) {
-      return NextResponse.json(
-        { error: "Capienza del ristorante non configurata" },
-        { status: 400 }
-      );
-    }
-
-    const { data: existingReservations, error: reservationsError } =
-      await supabaseAdmin
-        .from("reservation")
-        .select("guests")
-        .eq("company_id", companyId)
-        .eq("reservation_date", reservationDate)
-        .eq("reservation_time", reservationTime)
-        .neq("status", "cancelled");
-
-    if (reservationsError) {
-      console.error(
-        "Errore controllo prenotazioni:",
-        reservationsError
-      );
-
-      return NextResponse.json(
-        { error: "Impossibile verificare i posti disponibili" },
-        { status: 500 }
-      );
-    }
-
-    const alreadyBookedGuests = (
-      existingReservations ?? []
-    ).reduce(
-      (total, reservation) =>
-        total + Number(reservation.guests ?? 0),
-      0
-    );
-
-    const maxGuests = Number(capacity.max_guests);
-    const remainingGuests = maxGuests - alreadyBookedGuests;
-
-    if (remainingGuests < guests) {
+    if (
+      !validSlots.includes(
+        reservationTime
+      )
+    ) {
       return NextResponse.json(
         {
           error:
-            "Questo orario non ha abbastanza posti disponibili. Scegli un altro slot.",
+            "L’orario selezionato non è valido",
         },
-        { status: 409 }
+        {
+          status: 400,
+        }
       );
     }
 
-    const { data: newReservation, error: insertError } =
-      await supabaseAdmin
-        .from("reservation")
-        .insert({
-          company_id: companyId,
-          customer_name: customerName,
-          customer_phone: customerPhone,
-          reservation_date: reservationDate,
-          reservation_time: reservationTime,
-          guests,
-          notes: notes || null,
-          status: "pending",
-        })
-        .select(
-          "id, customer_name, customer_phone, reservation_date, reservation_time, guests, notes, status"
-        )
-        .single();
+    /*
+     * -----------------------------------------
+     * 8. CREAZIONE ATOMICA
+     * -----------------------------------------
+     *
+     * Da questo momento PostgreSQL controlla:
+     *
+     * - capienza totale
+     * - prenotazioni sovrapposte
+     * - tavoli disponibili
+     * - dimensione del tavolo
+     * - assegnazione automatica
+     * - inserimento prenotazione
+     *
+     * tutto nella stessa transazione.
+     */
 
-    if (insertError || !newReservation) {
+    const {
+      data: atomicResult,
+      error: atomicError,
+    } = await supabaseAdmin.rpc(
+      "create_reservation_atomic",
+      {
+        p_company_id:
+          companyId,
+
+        p_customer_name:
+          customerName,
+
+        p_customer_phone:
+          customerPhone,
+
+        p_reservation_date:
+          reservationDate,
+
+        p_reservation_time:
+          reservationTime,
+
+        p_guests:
+          guests,
+
+        p_notes:
+          notes,
+
+        p_table_duration_minutes:
+          tableDurationMinutes,
+      }
+    );
+
+    if (atomicError) {
       console.error(
-        "Errore inserimento prenotazione:",
-        insertError
+        "Errore create_reservation_atomic:",
+        atomicError
       );
 
       return NextResponse.json(
-        { error: "Impossibile salvare la prenotazione" },
-        { status: 500 }
+        {
+          error:
+            "Impossibile completare la prenotazione. Riprova.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
-    return NextResponse.json({
-      ok: true,
-      reservation: newReservation,
-      customerEmail: customerEmail || null,
-      remainingGuests: remainingGuests - guests,
-    });
-  } catch (error) {
-    console.error("Errore API prenotazione:", error);
+    const result =
+      atomicResult as
+        | AtomicReservationResult
+        | null;
+
+    /*
+     * -----------------------------------------
+     * 9. PRENOTAZIONE RIFIUTATA
+     * -----------------------------------------
+     */
+
+    if (
+      !result ||
+      result.ok !== true
+    ) {
+      /*
+       * Capienza terminata
+       */
+
+      if (
+        result?.reason ===
+        "capacity_full"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              result.message ??
+              "Questo orario non ha più abbastanza posti disponibili.",
+
+            available:
+              false,
+
+            reason:
+              "capacity_full",
+
+            maxGuests:
+              result.maxGuests,
+
+            alreadyBookedGuests:
+              result.alreadyBookedGuests,
+
+            remainingGuests:
+              result.remainingGuests,
+
+            tableDurationMinutes,
+          },
+          {
+            status: 409,
+          }
+        );
+      }
+
+      /*
+       * Nessun tavolo adatto/libero
+       */
+
+      if (
+        result?.reason ===
+        "no_table_available"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              result.message ??
+              "Non ci sono tavoli disponibili per questo orario.",
+
+            available:
+              false,
+
+            reason:
+              "no_table_available",
+
+            noTableAvailable:
+              true,
+
+            maxGuests:
+              result.maxGuests,
+
+            alreadyBookedGuests:
+              result.alreadyBookedGuests,
+
+            remainingGuests:
+              result.remainingGuests,
+
+            tableDurationMinutes,
+          },
+          {
+            status: 409,
+          }
+        );
+      }
+
+      /*
+       * Capienza non configurata
+       */
+
+      if (
+        result?.reason ===
+        "capacity_not_configured"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              result.message ??
+              "Capienza del ristorante non configurata.",
+
+            available:
+              false,
+
+            reason:
+              "capacity_not_configured",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      /*
+       * Altro errore gestito
+       */
+
+      return NextResponse.json(
+        {
+          error:
+            result?.message ??
+            "Prenotazione non disponibile.",
+
+          available:
+            false,
+
+          reason:
+            result?.reason ??
+            "reservation_unavailable",
+        },
+        {
+          status: 409,
+        }
+      );
+    }
+
+    /*
+     * -----------------------------------------
+     * 10. PRENOTAZIONE CREATA
+     * -----------------------------------------
+     */
 
     return NextResponse.json(
-      { error: "Errore interno" },
-      { status: 500 }
+      {
+        ok: true,
+
+        reservation:
+          result.reservation,
+
+        table:
+          result.table,
+
+        customerEmail:
+          customerEmail ||
+          null,
+
+        restaurantName,
+
+        phone:
+          restaurantPhone,
+
+        maxGuests:
+          result.maxGuests,
+
+        alreadyBookedGuests:
+          result.alreadyBookedGuests,
+
+        remainingGuests:
+          result.remainingGuests,
+
+        maxGuestsPerReservation,
+
+        tableDurationMinutes,
+      },
+      {
+        headers: {
+          "Cache-Control":
+            "no-store",
+        },
+      }
+    );
+  } catch (error) {
+    console.error(
+      "Errore API prenotazione:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "Errore interno",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
