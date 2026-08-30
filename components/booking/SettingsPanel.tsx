@@ -30,6 +30,26 @@ type CapacityRow = {
   is_active: boolean;
 };
 
+type RestaurantSettingsRow = {
+  id: string;
+  company_id: string;
+  restaurant_name: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  table_duration_minutes: number;
+  max_guests_per_reservation: number;
+};
+
+type RestaurantInfo = {
+  restaurantName: string;
+  phone: string;
+  email: string;
+  address: string;
+  tableDurationMinutes: number;
+  maxGuestsPerReservation: number;
+};
+
 type ServiceSettings = {
   enabled: boolean;
   startTime: string;
@@ -48,41 +68,13 @@ type DaySettings = {
 };
 
 const DAYS = [
-  {
-    dayOfWeek: 1,
-    label: "Lunedì",
-    shortLabel: "Lun",
-  },
-  {
-    dayOfWeek: 2,
-    label: "Martedì",
-    shortLabel: "Mar",
-  },
-  {
-    dayOfWeek: 3,
-    label: "Mercoledì",
-    shortLabel: "Mer",
-  },
-  {
-    dayOfWeek: 4,
-    label: "Giovedì",
-    shortLabel: "Gio",
-  },
-  {
-    dayOfWeek: 5,
-    label: "Venerdì",
-    shortLabel: "Ven",
-  },
-  {
-    dayOfWeek: 6,
-    label: "Sabato",
-    shortLabel: "Sab",
-  },
-  {
-    dayOfWeek: 0,
-    label: "Domenica",
-    shortLabel: "Dom",
-  },
+  { dayOfWeek: 1, label: "Lunedì", shortLabel: "Lun" },
+  { dayOfWeek: 2, label: "Martedì", shortLabel: "Mar" },
+  { dayOfWeek: 3, label: "Mercoledì", shortLabel: "Mer" },
+  { dayOfWeek: 4, label: "Giovedì", shortLabel: "Gio" },
+  { dayOfWeek: 5, label: "Venerdì", shortLabel: "Ven" },
+  { dayOfWeek: 6, label: "Sabato", shortLabel: "Sab" },
+  { dayOfWeek: 0, label: "Domenica", shortLabel: "Dom" },
 ];
 
 const TIME_OPTIONS = createTimeOptions();
@@ -94,7 +86,6 @@ function createTimeOptions() {
     for (const minute of [0, 30]) {
       const h = String(hour).padStart(2, "0");
       const m = String(minute).padStart(2, "0");
-
       values.push(`${h}:${m}`);
     }
   }
@@ -125,11 +116,8 @@ function createDefaultSettings(): DaySettings[] {
   }));
 }
 
-function cleanTime(
-  value: string | null | undefined
-) {
+function cleanTime(value: string | null | undefined) {
   if (!value) return "";
-
   return value.slice(0, 5);
 }
 
@@ -144,6 +132,16 @@ export default function SettingsPanel() {
       createDefaultSettings()
     );
 
+  const [restaurantInfo, setRestaurantInfo] =
+    useState<RestaurantInfo>({
+      restaurantName: "",
+      phone: "",
+      email: "",
+      address: "",
+      tableDurationMinutes: 120,
+      maxGuestsPerReservation: 10,
+    });
+
   const [loading, setLoading] =
     useState(true);
 
@@ -153,15 +151,11 @@ export default function SettingsPanel() {
   const [errorMessage, setErrorMessage] =
     useState("");
 
-  const [
-    successMessage,
-    setSuccessMessage,
-  ] = useState("");
+  const [successMessage, setSuccessMessage] =
+    useState("");
 
-  const [
-    showSavedBanner,
-    setShowSavedBanner,
-  ] = useState(false);
+  const [showSavedBanner, setShowSavedBanner] =
+    useState(false);
 
   const loadSettings = useCallback(
     async (clearMessages = true) => {
@@ -172,8 +166,7 @@ export default function SettingsPanel() {
       }
 
       const companyId =
-        process.env
-          .NEXT_PUBLIC_PILOT_COMPANY_ID;
+        process.env.NEXT_PUBLIC_PILOT_COMPANY_ID;
 
       if (!companyId) {
         setErrorMessage(
@@ -187,37 +180,47 @@ export default function SettingsPanel() {
       const [
         availabilityResult,
         capacityResult,
+        restaurantResult,
       ] = await Promise.all([
         supabase
-          .from(
-            "reservation_availability"
-          )
-          .select(
-            `
-              id,
-              company_id,
-              day_of_week,
-              service,
-              start_time,
-              end_time,
-              slot_minutes,
-              is_active
-            `
-          )
+          .from("reservation_availability")
+          .select(`
+            id,
+            company_id,
+            day_of_week,
+            service,
+            start_time,
+            end_time,
+            slot_minutes,
+            is_active
+          `)
           .eq("company_id", companyId),
 
         supabase
           .from("reservation_capacity")
-          .select(
-            `
-              id,
-              company_id,
-              day_of_week,
-              max_guests,
-              is_active
-            `
-          )
+          .select(`
+            id,
+            company_id,
+            day_of_week,
+            max_guests,
+            is_active
+          `)
           .eq("company_id", companyId),
+
+        supabase
+          .from("restaurant_settings")
+          .select(`
+            id,
+            company_id,
+            restaurant_name,
+            phone,
+            email,
+            address,
+            table_duration_minutes,
+            max_guests_per_reservation
+          `)
+          .eq("company_id", companyId)
+          .maybeSingle(),
       ]);
 
       if (availabilityResult.error) {
@@ -248,13 +251,52 @@ export default function SettingsPanel() {
         return;
       }
 
+      if (restaurantResult.error) {
+        console.log(
+          "Errore dati ristorante:",
+          restaurantResult.error
+        );
+
+        setErrorMessage(
+          "Errore durante il caricamento dei dati del ristorante."
+        );
+
+        setLoading(false);
+        return;
+      }
+
       const availability =
-        (availabilityResult.data ??
-          []) as AvailabilityRow[];
+        (availabilityResult.data ?? []) as AvailabilityRow[];
 
       const capacities =
-        (capacityResult.data ??
-          []) as CapacityRow[];
+        (capacityResult.data ?? []) as CapacityRow[];
+
+      const restaurant =
+        restaurantResult.data as
+          | RestaurantSettingsRow
+          | null;
+
+      if (restaurant) {
+        setRestaurantInfo({
+          restaurantName:
+            restaurant.restaurant_name ?? "",
+
+          phone:
+            restaurant.phone ?? "",
+
+          email:
+            restaurant.email ?? "",
+
+          address:
+            restaurant.address ?? "",
+
+          tableDurationMinutes:
+            restaurant.table_duration_minutes ?? 120,
+
+          maxGuestsPerReservation:
+            restaurant.max_guests_per_reservation ?? 10,
+        });
+      }
 
       const nextSettings =
         createDefaultSettings().map(
@@ -262,26 +304,21 @@ export default function SettingsPanel() {
             const lunch =
               availability.find(
                 (row) =>
-                  row.day_of_week ===
-                    day.dayOfWeek &&
-                  row.service?.toLowerCase() ===
-                    "pranzo"
+                  row.day_of_week === day.dayOfWeek &&
+                  row.service?.toLowerCase() === "pranzo"
               );
 
             const dinner =
               availability.find(
                 (row) =>
-                  row.day_of_week ===
-                    day.dayOfWeek &&
-                  row.service?.toLowerCase() ===
-                    "cena"
+                  row.day_of_week === day.dayOfWeek &&
+                  row.service?.toLowerCase() === "cena"
               );
 
             const capacity =
               capacities.find(
                 (row) =>
-                  row.day_of_week ===
-                  day.dayOfWeek
+                  row.day_of_week === day.dayOfWeek
               );
 
             return {
@@ -289,37 +326,29 @@ export default function SettingsPanel() {
 
               lunch: lunch
                 ? {
-                    enabled:
-                      lunch.is_active,
+                    enabled: lunch.is_active,
                     startTime:
-                      cleanTime(
-                        lunch.start_time
-                      ) || "12:00",
+                      cleanTime(lunch.start_time) ||
+                      "12:00",
                     endTime:
-                      cleanTime(
-                        lunch.end_time
-                      ) || "15:00",
+                      cleanTime(lunch.end_time) ||
+                      "15:00",
                     slotMinutes:
-                      lunch.slot_minutes ??
-                      30,
+                      lunch.slot_minutes ?? 30,
                   }
                 : day.lunch,
 
               dinner: dinner
                 ? {
-                    enabled:
-                      dinner.is_active,
+                    enabled: dinner.is_active,
                     startTime:
-                      cleanTime(
-                        dinner.start_time
-                      ) || "19:30",
+                      cleanTime(dinner.start_time) ||
+                      "19:30",
                     endTime:
-                      cleanTime(
-                        dinner.end_time
-                      ) || "23:00",
+                      cleanTime(dinner.end_time) ||
+                      "23:00",
                     slotMinutes:
-                      dinner.slot_minutes ??
-                      30,
+                      dinner.slot_minutes ?? 30,
                   }
                 : day.dinner,
 
@@ -344,20 +373,36 @@ export default function SettingsPanel() {
     loadSettings();
   }, [loadSettings]);
 
+  function markChanged() {
+    setSuccessMessage("");
+    setShowSavedBanner(false);
+  }
+
+  function updateRestaurantInfo<
+    K extends keyof RestaurantInfo
+  >(
+    field: K,
+    value: RestaurantInfo[K]
+  ) {
+    markChanged();
+
+    setRestaurantInfo((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
   function updateService(
     dayOfWeek: number,
     service: ServiceName,
     field: keyof ServiceSettings,
     value: string | number | boolean
   ) {
-    setSuccessMessage("");
-    setShowSavedBanner(false);
+    markChanged();
 
     setSettings((current) =>
       current.map((day) => {
-        if (
-          day.dayOfWeek !== dayOfWeek
-        ) {
+        if (day.dayOfWeek !== dayOfWeek) {
           return day;
         }
 
@@ -368,7 +413,6 @@ export default function SettingsPanel() {
 
         return {
           ...day,
-
           [key]: {
             ...day[key],
             [field]: value,
@@ -382,29 +426,22 @@ export default function SettingsPanel() {
     dayOfWeek: number,
     value: number
   ) {
-    setSuccessMessage("");
-    setShowSavedBanner(false);
+    markChanged();
 
     setSettings((current) =>
       current.map((day) =>
         day.dayOfWeek === dayOfWeek
           ? {
               ...day,
-              maxGuests: Math.max(
-                1,
-                value
-              ),
+              maxGuests: Math.max(1, value),
             }
           : day
       )
     );
   }
 
-  function toggleCapacity(
-    dayOfWeek: number
-  ) {
-    setSuccessMessage("");
-    setShowSavedBanner(false);
+  function toggleCapacity(dayOfWeek: number) {
+    markChanged();
 
     setSettings((current) =>
       current.map((day) =>
@@ -419,6 +456,50 @@ export default function SettingsPanel() {
     );
   }
 
+  async function saveRestaurantInfo(
+    companyId: string
+  ) {
+    const { error } = await supabase
+      .from("restaurant_settings")
+      .upsert(
+        {
+          company_id: companyId,
+
+          restaurant_name:
+            restaurantInfo.restaurantName.trim() ||
+            null,
+
+          phone:
+            restaurantInfo.phone.trim() ||
+            null,
+
+          email:
+            restaurantInfo.email.trim() ||
+            null,
+
+          address:
+            restaurantInfo.address.trim() ||
+            null,
+
+          table_duration_minutes:
+            restaurantInfo.tableDurationMinutes,
+
+          max_guests_per_reservation:
+            restaurantInfo.maxGuestsPerReservation,
+
+          updated_at:
+            new Date().toISOString(),
+        },
+        {
+          onConflict: "company_id",
+        }
+      );
+
+    if (error) {
+      throw error;
+    }
+  }
+
   async function saveAvailability(
     companyId: string,
     day: DaySettings,
@@ -429,15 +510,10 @@ export default function SettingsPanel() {
       data: existingRows,
       error: existingError,
     } = await supabase
-      .from(
-        "reservation_availability"
-      )
+      .from("reservation_availability")
       .select("id")
       .eq("company_id", companyId)
-      .eq(
-        "day_of_week",
-        day.dayOfWeek
-      )
+      .eq("day_of_week", day.dayOfWeek)
       .eq("service", service);
 
     if (existingError) {
@@ -447,8 +523,7 @@ export default function SettingsPanel() {
     const payload = {
       start_time: data.startTime,
       end_time: data.endTime,
-      slot_minutes:
-        data.slotMinutes,
+      slot_minutes: data.slotMinutes,
       is_active: data.enabled,
     };
 
@@ -457,15 +532,10 @@ export default function SettingsPanel() {
       existingRows.length > 0
     ) {
       const { error } = await supabase
-        .from(
-          "reservation_availability"
-        )
+        .from("reservation_availability")
         .update(payload)
         .eq("company_id", companyId)
-        .eq(
-          "day_of_week",
-          day.dayOfWeek
-        )
+        .eq("day_of_week", day.dayOfWeek)
         .eq("service", service);
 
       if (error) {
@@ -476,13 +546,10 @@ export default function SettingsPanel() {
     }
 
     const { error } = await supabase
-      .from(
-        "reservation_availability"
-      )
+      .from("reservation_availability")
       .insert({
         company_id: companyId,
-        day_of_week:
-          day.dayOfWeek,
+        day_of_week: day.dayOfWeek,
         service,
         ...payload,
       });
@@ -503,10 +570,7 @@ export default function SettingsPanel() {
       .from("reservation_capacity")
       .select("id")
       .eq("company_id", companyId)
-      .eq(
-        "day_of_week",
-        day.dayOfWeek
-      );
+      .eq("day_of_week", day.dayOfWeek);
 
     if (existingError) {
       throw existingError;
@@ -514,8 +578,7 @@ export default function SettingsPanel() {
 
     const payload = {
       max_guests: day.maxGuests,
-      is_active:
-        day.capacityEnabled,
+      is_active: day.capacityEnabled,
     };
 
     if (
@@ -523,15 +586,10 @@ export default function SettingsPanel() {
       existingRows.length > 0
     ) {
       const { error } = await supabase
-        .from(
-          "reservation_capacity"
-        )
+        .from("reservation_capacity")
         .update(payload)
         .eq("company_id", companyId)
-        .eq(
-          "day_of_week",
-          day.dayOfWeek
-        );
+        .eq("day_of_week", day.dayOfWeek);
 
       if (error) {
         throw error;
@@ -544,8 +602,7 @@ export default function SettingsPanel() {
       .from("reservation_capacity")
       .insert({
         company_id: companyId,
-        day_of_week:
-          day.dayOfWeek,
+        day_of_week: day.dayOfWeek,
         ...payload,
       });
 
@@ -556,12 +613,29 @@ export default function SettingsPanel() {
 
   async function saveSettings() {
     const companyId =
-      process.env
-        .NEXT_PUBLIC_PILOT_COMPANY_ID;
+      process.env.NEXT_PUBLIC_PILOT_COMPANY_ID;
 
     if (!companyId) {
       setErrorMessage(
         "Company ID non configurato."
+      );
+      return;
+    }
+
+    if (
+      restaurantInfo.tableDurationMinutes < 30
+    ) {
+      setErrorMessage(
+        "La durata del tavolo deve essere di almeno 30 minuti."
+      );
+      return;
+    }
+
+    if (
+      restaurantInfo.maxGuestsPerReservation < 1
+    ) {
+      setErrorMessage(
+        "Inserisci un numero massimo di persone valido."
       );
       return;
     }
@@ -575,7 +649,6 @@ export default function SettingsPanel() {
         setErrorMessage(
           `${day.label}: l'orario di fine pranzo deve essere successivo all'orario di apertura.`
         );
-
         return;
       }
 
@@ -587,7 +660,6 @@ export default function SettingsPanel() {
         setErrorMessage(
           `${day.label}: l'orario di fine cena deve essere successivo all'orario di apertura.`
         );
-
         return;
       }
 
@@ -595,7 +667,6 @@ export default function SettingsPanel() {
         setErrorMessage(
           `${day.label}: inserisci una capienza valida.`
         );
-
         return;
       }
     }
@@ -606,6 +677,8 @@ export default function SettingsPanel() {
     setShowSavedBanner(false);
 
     try {
+      await saveRestaurantInfo(companyId);
+
       for (const day of settings) {
         await saveAvailability(
           companyId,
@@ -630,7 +703,7 @@ export default function SettingsPanel() {
       await loadSettings(false);
 
       setSuccessMessage(
-        "Modifiche salvate correttamente."
+        "Dati ristorante, orari e capienza sono stati salvati correttamente."
       );
 
       setShowSavedBanner(true);
@@ -658,8 +731,7 @@ export default function SettingsPanel() {
   function copyMondayToAll() {
     const monday =
       settings.find(
-        (day) =>
-          day.dayOfWeek === 1
+        (day) => day.dayOfWeek === 1
       );
 
     if (!monday) return;
@@ -704,8 +776,7 @@ export default function SettingsPanel() {
 
   const activeDinnerDays =
     settings.filter(
-      (day) =>
-        day.dinner.enabled
+      (day) => day.dinner.enabled
     ).length;
 
   const averageCapacity =
@@ -713,8 +784,7 @@ export default function SettingsPanel() {
       ? Math.round(
           settings.reduce(
             (sum, day) =>
-              sum +
-              day.maxGuests,
+              sum + day.maxGuests,
             0
           ) / settings.length
         )
@@ -749,9 +819,8 @@ export default function SettingsPanel() {
           </h2>
 
           <p>
-            Configura gli orari delle
-            prenotazioni, gli intervalli
-            e la capienza giornaliera.
+            Gestisci dati del locale,
+            prenotazioni, orari e capienza.
           </p>
         </div>
 
@@ -760,30 +829,21 @@ export default function SettingsPanel() {
             <strong>
               {activeLunchDays}
             </strong>
-
-            <span>
-              Pranzi attivi
-            </span>
+            <span>Pranzi attivi</span>
           </div>
 
           <div>
             <strong>
               {activeDinnerDays}
             </strong>
-
-            <span>
-              Cene attive
-            </span>
+            <span>Cene attive</span>
           </div>
 
           <div>
             <strong>
               {averageCapacity}
             </strong>
-
-            <span>
-              Capienza media
-            </span>
+            <span>Capienza media</span>
           </div>
         </div>
       </div>
@@ -821,6 +881,203 @@ export default function SettingsPanel() {
           </div>
         </div>
       )}
+
+      <section className="restaurant-card">
+        <div className="restaurant-card-header">
+          <div className="restaurant-icon">
+            🏪
+          </div>
+
+          <div>
+            <span>
+              DATI RISTORANTE
+            </span>
+
+            <h3>
+              Informazioni del locale
+            </h3>
+
+            <p>
+              Questi dati verranno utilizzati
+              da Assistly per prenotazioni e
+              assistenza clienti.
+            </p>
+          </div>
+        </div>
+
+        <div className="restaurant-form">
+          <div className="restaurant-field">
+            <label>
+              Nome ristorante
+            </label>
+
+            <input
+              type="text"
+              placeholder="Es. Ristorante Bella Napoli"
+              value={
+                restaurantInfo.restaurantName
+              }
+              onChange={(e) =>
+                updateRestaurantInfo(
+                  "restaurantName",
+                  e.target.value
+                )
+              }
+            />
+          </div>
+
+          <div className="restaurant-field">
+            <label>
+              Telefono
+            </label>
+
+            <input
+              type="tel"
+              placeholder="+39 ..."
+              value={
+                restaurantInfo.phone
+              }
+              onChange={(e) =>
+                updateRestaurantInfo(
+                  "phone",
+                  e.target.value
+                )
+              }
+            />
+          </div>
+
+          <div className="restaurant-field">
+            <label>
+              Email
+            </label>
+
+            <input
+              type="email"
+              placeholder="info@ristorante.it"
+              value={
+                restaurantInfo.email
+              }
+              onChange={(e) =>
+                updateRestaurantInfo(
+                  "email",
+                  e.target.value
+                )
+              }
+            />
+          </div>
+
+          <div className="restaurant-field restaurant-address">
+            <label>
+              Indirizzo
+            </label>
+
+            <input
+              type="text"
+              placeholder="Via, numero civico, città"
+              value={
+                restaurantInfo.address
+              }
+              onChange={(e) =>
+                updateRestaurantInfo(
+                  "address",
+                  e.target.value
+                )
+              }
+            />
+          </div>
+        </div>
+
+        <div className="booking-rules">
+          <div className="booking-rule">
+            <div className="rule-icon">
+              ⏱
+            </div>
+
+            <div className="rule-content">
+              <strong>
+                Durata media tavolo
+              </strong>
+
+              <span>
+                Tempo previsto di occupazione
+                per una prenotazione.
+              </span>
+            </div>
+
+            <select
+              value={
+                restaurantInfo.tableDurationMinutes
+              }
+              onChange={(e) =>
+                updateRestaurantInfo(
+                  "tableDurationMinutes",
+                  Number(e.target.value)
+                )
+              }
+            >
+              <option value={60}>
+                60 minuti
+              </option>
+
+              <option value={90}>
+                90 minuti
+              </option>
+
+              <option value={120}>
+                120 minuti
+              </option>
+
+              <option value={150}>
+                150 minuti
+              </option>
+
+              <option value={180}>
+                180 minuti
+              </option>
+            </select>
+          </div>
+
+          <div className="booking-rule">
+            <div className="rule-icon">
+              👥
+            </div>
+
+            <div className="rule-content">
+              <strong>
+                Massimo persone per prenotazione
+              </strong>
+
+              <span>
+                Oltre questo numero potremo
+                gestire la richiesta manualmente.
+              </span>
+            </div>
+
+            <select
+              value={
+                restaurantInfo.maxGuestsPerReservation
+              }
+              onChange={(e) =>
+                updateRestaurantInfo(
+                  "maxGuestsPerReservation",
+                  Number(e.target.value)
+                )
+              }
+            >
+              {[2, 4, 6, 8, 10, 12, 15, 20, 25, 30].map(
+                (value) => (
+                  <option
+                    key={value}
+                    value={value}
+                  >
+                    {value} persone
+                  </option>
+                )
+              )}
+            </select>
+          </div>
+        </div>
+      </section>
 
       <div className="settings-toolbar">
         <div>
@@ -921,31 +1178,19 @@ export default function SettingsPanel() {
               <ServiceCard
                 title="Pranzo"
                 icon="☀"
-                service={
-                  day.lunch
-                }
-                dayOfWeek={
-                  day.dayOfWeek
-                }
+                service={day.lunch}
+                dayOfWeek={day.dayOfWeek}
                 serviceName="pranzo"
-                onUpdate={
-                  updateService
-                }
+                onUpdate={updateService}
               />
 
               <ServiceCard
                 title="Cena"
                 icon="☾"
-                service={
-                  day.dinner
-                }
-                dayOfWeek={
-                  day.dayOfWeek
-                }
+                service={day.dinner}
+                dayOfWeek={day.dayOfWeek}
                 serviceName="cena"
-                onUpdate={
-                  updateService
-                }
+                onUpdate={updateService}
               />
             </div>
           </article>
@@ -959,9 +1204,8 @@ export default function SettingsPanel() {
           </strong>
 
           <span>
-            Le modifiche influenzeranno
-            la disponibilità delle
-            prenotazioni.
+            Salva dati ristorante, orari,
+            slot e capienza.
           </span>
         </div>
 
@@ -1000,10 +1244,7 @@ function ServiceCard({
     dayOfWeek: number,
     service: ServiceName,
     field: keyof ServiceSettings,
-    value:
-      | string
-      | number
-      | boolean
+    value: string | number | boolean
   ) => void;
 }) {
   return (
@@ -1049,15 +1290,11 @@ function ServiceCard({
 
       <div className="service-fields">
         <div className="settings-field">
-          <label>
-            Apertura
-          </label>
+          <label>Apertura</label>
 
           <select
             value={service.startTime}
-            disabled={
-              !service.enabled
-            }
+            disabled={!service.enabled}
             onChange={(e) =>
               onUpdate(
                 dayOfWeek,
@@ -1085,15 +1322,11 @@ function ServiceCard({
         </div>
 
         <div className="settings-field">
-          <label>
-            Chiusura
-          </label>
+          <label>Chiusura</label>
 
           <select
             value={service.endTime}
-            disabled={
-              !service.enabled
-            }
+            disabled={!service.enabled}
             onChange={(e) =>
               onUpdate(
                 dayOfWeek,
@@ -1122,20 +1355,14 @@ function ServiceCard({
           </label>
 
           <select
-            value={
-              service.slotMinutes
-            }
-            disabled={
-              !service.enabled
-            }
+            value={service.slotMinutes}
+            disabled={!service.enabled}
             onChange={(e) =>
               onUpdate(
                 dayOfWeek,
                 serviceName,
                 "slotMinutes",
-                Number(
-                  e.target.value
-                )
+                Number(e.target.value)
               )
             }
           >
@@ -1217,43 +1444,38 @@ function buildSlotPreview(
 
   const totalSlots =
     Math.floor(
-      (endMinutes -
-        startMinutes) /
+      (endMinutes - startMinutes) /
         interval
     ) + 1;
 
   if (totalSlots > slots.length) {
-    return `${slots.join(
-      " · "
-    )} · ...`;
+    return `${slots.join(" · ")} · ...`;
   }
 
   return slots.join(" · ");
 }
 
-function timeToMinutes(
-  value: string
-) {
+function timeToMinutes(value: string) {
   const [hours, minutes] =
     value.split(":").map(Number);
 
   return hours * 60 + minutes;
 }
 
-function minutesToTime(
-  minutes: number
-) {
+function minutesToTime(minutes: number) {
   const hours =
     Math.floor(minutes / 60);
 
   const mins =
     minutes % 60;
 
-  return `${String(
-    hours
-  ).padStart(2, "0")}:${String(
-    mins
-  ).padStart(2, "0")}`;
+  return `${String(hours).padStart(
+    2,
+    "0"
+  )}:${String(mins).padStart(
+    2,
+    "0"
+  )}`;
 }
 
 const styles = `
@@ -1290,23 +1512,18 @@ const styles = `
     margin: 0;
     color: #111827;
     font-size: 30px;
-    line-height: 1.1;
   }
 
   .settings-hero p {
     margin: 9px 0 0;
     color: #64748b;
     font-size: 14px;
-    line-height: 1.5;
   }
 
   .settings-summary {
     display: grid;
     grid-template-columns:
-      repeat(
-        3,
-        minmax(100px, 1fr)
-      );
+      repeat(3, minmax(100px, 1fr));
     gap: 9px;
   }
 
@@ -1392,6 +1609,164 @@ const styles = `
     font-size: 11px;
   }
 
+  .restaurant-card {
+    padding: 24px;
+    border: 1px solid #e6eaf0;
+    border-radius: 20px;
+    background: #ffffff;
+    box-shadow:
+      0 8px 30px
+      rgba(15, 23, 42, 0.035);
+  }
+
+  .restaurant-card-header {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    margin-bottom: 22px;
+  }
+
+  .restaurant-icon {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    border-radius: 13px;
+    background:
+      linear-gradient(
+        135deg,
+        #ede9fe,
+        #fae8ff
+      );
+    font-size: 20px;
+  }
+
+  .restaurant-card-header span {
+    display: block;
+    margin-bottom: 3px;
+    color: #7c3aed;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: 1.4px;
+  }
+
+  .restaurant-card-header h3 {
+    margin: 0;
+    color: #111827;
+    font-size: 18px;
+  }
+
+  .restaurant-card-header p {
+    margin: 4px 0 0;
+    color: #94a3b8;
+    font-size: 11px;
+  }
+
+  .restaurant-form {
+    display: grid;
+    grid-template-columns:
+      repeat(3, 1fr);
+    gap: 14px;
+  }
+
+  .restaurant-field {
+    display: grid;
+    gap: 7px;
+  }
+
+  .restaurant-address {
+    grid-column: 1 / -1;
+  }
+
+  .restaurant-field label {
+    color: #475569;
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  .restaurant-field input {
+    width: 100%;
+    height: 44px;
+    padding: 0 13px;
+    box-sizing: border-box;
+    outline: none;
+    border: 1px solid #dce2ea;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #172033;
+    font-size: 12px;
+  }
+
+  .restaurant-field input:focus {
+    border-color: #9f67f6;
+    box-shadow:
+      0 0 0 3px
+      rgba(124, 58, 237, 0.08);
+  }
+
+  .booking-rules {
+    display: grid;
+    grid-template-columns:
+      1fr 1fr;
+    gap: 12px;
+    margin-top: 18px;
+    padding-top: 18px;
+    border-top: 1px solid #edf0f4;
+  }
+
+  .booking-rule {
+    display: grid;
+    grid-template-columns:
+      auto 1fr auto;
+    align-items: center;
+    gap: 11px;
+    padding: 14px;
+    border: 1px solid #e7ebf1;
+    border-radius: 13px;
+    background: #fafbfc;
+  }
+
+  .rule-icon {
+    width: 35px;
+    height: 35px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: #f0ebff;
+    font-size: 15px;
+  }
+
+  .rule-content strong,
+  .rule-content span {
+    display: block;
+  }
+
+  .rule-content strong {
+    color: #172033;
+    font-size: 11px;
+  }
+
+  .rule-content span {
+    margin-top: 3px;
+    color: #94a3b8;
+    font-size: 9px;
+    line-height: 1.4;
+  }
+
+  .booking-rule select {
+    height: 38px;
+    min-width: 125px;
+    padding: 0 10px;
+    outline: none;
+    border: 1px solid #dce2ea;
+    border-radius: 9px;
+    background: #ffffff;
+    color: #172033;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
   .settings-toolbar {
     display: flex;
     align-items: center;
@@ -1436,9 +1811,6 @@ const styles = `
     border: 1px solid #e6eaf0;
     border-radius: 18px;
     background: #ffffff;
-    box-shadow:
-      0 6px 24px
-      rgba(15, 23, 42, 0.03);
   }
 
   .day-header {
@@ -1502,10 +1874,8 @@ const styles = `
     outline: none;
     border: 1px solid #dce2ea;
     border-radius: 9px;
-    color: #172033;
     background: #ffffff;
-    font-size: 12px;
-    font-weight: 700;
+    color: #172033;
   }
 
   .capacity-row span {
@@ -1515,13 +1885,11 @@ const styles = `
 
   .services-grid {
     display: grid;
-    grid-template-columns:
-      1fr 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 12px;
   }
 
   .service-card {
-    position: relative;
     padding: 16px;
     border: 1px solid #e7ebf1;
     border-radius: 14px;
@@ -1593,8 +1961,7 @@ const styles = `
 
   .service-toggle.enabled i,
   .mini-toggle.enabled i {
-    transform:
-      translateX(16px);
+    transform: translateX(16px);
   }
 
   .mini-toggle {
@@ -1608,8 +1975,7 @@ const styles = `
   }
 
   .mini-toggle.enabled i {
-    transform:
-      translateX(14px);
+    transform: translateX(14px);
   }
 
   .service-fields {
@@ -1639,28 +2005,11 @@ const styles = `
     width: 100%;
     height: 39px;
     padding: 0 10px;
-    box-sizing: border-box;
-    outline: none;
     border: 1px solid #dce2ea;
     border-radius: 9px;
-    color: #172033;
     background: #ffffff;
+    color: #172033;
     font-size: 11px;
-    cursor: pointer;
-  }
-
-  .settings-field select:focus,
-  .capacity-row input:focus {
-    border-color: #9f67f6;
-    box-shadow:
-      0 0 0 3px
-      rgba(124, 58, 237, 0.08);
-  }
-
-  .settings-field select:disabled {
-    cursor: not-allowed;
-    color: #94a3b8;
-    background: #eef1f4;
   }
 
   .time-arrow {
@@ -1718,10 +2067,10 @@ const styles = `
     border: 1px solid #ddd6fe;
     border-radius: 16px;
     background:
-      rgba(255,255,255,0.96);
+      rgba(255, 255, 255, 0.96);
     box-shadow:
       0 12px 35px
-      rgba(15,23,42,0.12);
+      rgba(15, 23, 42, 0.12);
     backdrop-filter: blur(10px);
   }
 
@@ -1784,14 +2133,12 @@ const styles = `
     border-top-color: #7c3aed;
     border-radius: 50%;
     animation:
-      settingsSpin 0.8s
-      linear infinite;
+      settingsSpin 0.8s linear infinite;
   }
 
   @keyframes settingsSpin {
     to {
-      transform:
-        rotate(360deg);
+      transform: rotate(360deg);
     }
   }
 
@@ -1805,6 +2152,14 @@ const styles = `
       width: 100%;
     }
 
+    .restaurant-form {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .booking-rules {
+      grid-template-columns: 1fr;
+    }
+
     .services-grid {
       grid-template-columns: 1fr;
     }
@@ -1812,6 +2167,7 @@ const styles = `
 
   @media (max-width: 760px) {
     .settings-hero,
+    .restaurant-card,
     .day-card {
       padding: 18px;
       border-radius: 16px;
@@ -1825,6 +2181,24 @@ const styles = `
       grid-template-columns: 1fr;
     }
 
+    .restaurant-form {
+      grid-template-columns: 1fr;
+    }
+
+    .restaurant-address {
+      grid-column: auto;
+    }
+
+    .booking-rule {
+      grid-template-columns:
+        auto 1fr;
+    }
+
+    .booking-rule select {
+      grid-column: 1 / -1;
+      width: 100%;
+    }
+
     .settings-toolbar {
       align-items: stretch;
       flex-direction: column;
@@ -1836,7 +2210,8 @@ const styles = `
     }
 
     .service-fields {
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns:
+        1fr 1fr;
     }
 
     .time-arrow {
@@ -1844,8 +2219,7 @@ const styles = `
     }
 
     .slot-field {
-      grid-column:
-        1 / -1;
+      grid-column: 1 / -1;
     }
 
     .settings-save-bar {
