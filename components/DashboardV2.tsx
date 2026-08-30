@@ -14,6 +14,7 @@ import ReservationsPanel from "./booking/ReservationsPanel";
 import CalendarPanel from "./booking/CalendarPanel";
 import TableMapPanel from "./booking/TableMapPanel";
 import TablesPanel from "./booking/TablesPanel";
+import SettingsPanel from "./booking/SettingsPanel";
 
 type DashboardPage =
   | "dashboard"
@@ -165,12 +166,8 @@ export default function DashboardV2() {
           )}
 
           {page === "impostazioni" && (
-            <PlaceholderPanel
-              eyebrow="CONFIGURAZIONE"
-              title="Impostazioni"
-              description="Orari, capacità, dati aziendali e preferenze del ristorante."
-            />
-          )}
+  <SettingsPanel />
+)}
         </div>
       </main>
     </div>
