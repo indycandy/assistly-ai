@@ -25,6 +25,85 @@ export default function PrenotaPage() {
 
   const [time, setTime] =
     useState("");
+    useEffect(() => {
+  const params = new URLSearchParams(
+    window.location.search
+  );
+
+  const guestsParam = Number(
+    params.get("guests")
+  );
+
+  const serviceParam =
+    params.get("service");
+
+  const dateParam =
+    params.get("date");
+
+  let validGuests = false;
+  let validService = false;
+  let validDate = false;
+
+  if (
+    Number.isInteger(guestsParam) &&
+    guestsParam >= 1 &&
+    guestsParam <= 30
+  ) {
+    setGuests(guestsParam);
+    validGuests = true;
+  }
+
+  if (
+    serviceParam === "pranzo" ||
+    serviceParam === "cena"
+  ) {
+    setSession(serviceParam);
+    validService = true;
+  }
+
+  if (
+    dateParam &&
+    /^\d{4}-\d{2}-\d{2}$/.test(
+      dateParam
+    )
+  ) {
+    const candidateDate =
+      new Date(
+        `${dateParam}T12:00:00`
+      );
+
+    const today = new Date();
+
+    today.setHours(0, 0, 0, 0);
+
+    if (
+      !Number.isNaN(
+        candidateDate.getTime()
+      ) &&
+      candidateDate >= today
+    ) {
+      setDate(dateParam);
+
+      setCalendarMonth(
+        new Date(
+          candidateDate.getFullYear(),
+          candidateDate.getMonth(),
+          1
+        )
+      );
+
+      validDate = true;
+    }
+  }
+
+  if (
+    validGuests &&
+    validService &&
+    validDate
+  ) {
+    setStep(4);
+  }
+}, []);
 
   const [
     customerName,
