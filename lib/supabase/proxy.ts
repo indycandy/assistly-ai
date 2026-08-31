@@ -61,7 +61,8 @@ export async function updateSession(
     pathname.startsWith("/auth") ||
     pathname === "/prenota" ||
     pathname.startsWith("/api/availability") ||
-    pathname.startsWith("/api/reservations");
+    pathname.startsWith("/api/reservations") ||
+    pathname.startsWith("/api/booking-link");
 
   if (isPublicRoute) {
     return supabaseResponse;
