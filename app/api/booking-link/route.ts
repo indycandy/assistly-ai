@@ -1,6 +1,11 @@
+import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 type Service = "pranzo" | "cena";
 
@@ -8,6 +13,12 @@ type ParsedBookingRequest = {
   guests: number | null;
   service: Service | null;
   date: string | null;
+};
+
+type AIParsedBookingRequest = {
+  guests?: number | null;
+  service?: Service | null;
+  date?: string | null;
 };
 
 const NUMBER_WORDS: Record<
@@ -186,12 +197,6 @@ function parseGuests(
   const normalized =
     normalizeText(message);
 
-  /*
-   * Numeri:
-   * "per 4"
-   * "4 persone"
-   * "siamo in 4"
-   */
   const numericPatterns = [
     /(?:per|in)\s+(\d{1,2})\b/i,
 
@@ -227,12 +232,6 @@ function parseGuests(
     }
   }
 
-  /*
-   * Numeri scritti in lettere:
-   * "per quattro"
-   * "siamo in quattro"
-   * "due persone"
-   */
   const words =
     Object.keys(
       NUMBER_WORDS
@@ -334,11 +333,6 @@ function parseDate(
   const today =
     getTodayInRome();
 
-  /*
-   * Oggi / domani /
-   * dopodomani
-   */
-
   if (
     normalized.includes(
       "dopodomani"
@@ -371,13 +365,6 @@ function parseDate(
       today
     );
   }
-
-  /*
-   * Formato numerico:
-   * 05/09
-   * 5-9
-   * 05/09/2026
-   */
 
   const numericDate =
     normalized.match(
@@ -438,13 +425,6 @@ function parseDate(
       );
     }
   }
-
-  /*
-   * Data scritta:
-   * "5 settembre"
-   * "il 5 settembre"
-   * "5 settembre 2026"
-   */
 
   const monthNames =
     Object.keys(
@@ -520,14 +500,6 @@ function parseDate(
     );
   }
 
-  /*
-   * Giorni della settimana:
-   * sabato
-   * venerdì
-   * sabato prossimo
-   * questo sabato
-   */
-
   for (
     const [
       weekdayName,
@@ -553,18 +525,13 @@ function parseDate(
     const currentDay =
       today.getDay();
 
-    let difference =
+    const difference =
       (
         weekdayNumber -
         currentDay +
         7
       ) % 7;
 
-    /*
-     * Se scrive il nome
-     * del giorno che è oggi,
-     * interpretiamo oggi.
-     */
     const candidate =
       addDays(
         today,
@@ -606,6 +573,252 @@ function formatItalianDate(
   return `${day}/${month}/${year}`;
 }
 
+function isValidDateString(
+  value: unknown
+): value is string {
+  if (
+    typeof value !==
+    "string"
+  ) {
+    return false;
+  }
+
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(
+      value
+    )
+  ) {
+    return false;
+  }
+
+  const [
+    year,
+    month,
+    day,
+  ] =
+    value
+      .split("-")
+      .map(Number);
+
+  const candidate =
+    new Date(
+      year,
+      month - 1,
+      day,
+      12,
+      0,
+      0
+    );
+
+  return (
+    candidate.getFullYear() ===
+      year &&
+    candidate.getMonth() ===
+      month - 1 &&
+    candidate.getDate() ===
+      day
+  );
+}
+
+function cleanAIJson(
+  value: string
+) {
+  return value
+    .trim()
+    .replace(
+      /^```json\s*/i,
+      ""
+    )
+    .replace(
+      /^```\s*/i,
+      ""
+    )
+    .replace(
+      /\s*```$/,
+      ""
+    )
+    .trim();
+}
+
+async function enrichWithAI(
+  message: string,
+  current:
+    ParsedBookingRequest
+): Promise<ParsedBookingRequest> {
+  /*
+   * Se il parser normale ha già
+   * capito tutto, NON usiamo AI.
+   */
+  if (
+    current.guests &&
+    current.service &&
+    current.date
+  ) {
+    return current;
+  }
+
+  /*
+   * Se la chiave non è configurata,
+   * continuiamo normalmente senza AI.
+   */
+  if (
+    !process.env
+      .OPENAI_API_KEY
+  ) {
+    return current;
+  }
+
+  try {
+    const today =
+      formatDate(
+        getTodayInRome()
+      );
+
+    const response =
+      await openai.responses.create({
+        model:
+          "gpt-4.1-mini",
+
+        input: [
+          {
+            role: "system",
+
+            content: `
+Sei un parser di richieste di prenotazione ristorante.
+
+Devi estrarre ESCLUSIVAMENTE:
+- guests: numero di persone
+- service: "pranzo" oppure "cena"
+- date: data in formato YYYY-MM-DD
+
+La data di oggi in Italia (Europe/Rome) è ${today}.
+
+REGOLE IMPORTANTI:
+
+1. Rispondi SOLO con JSON valido.
+2. Non aggiungere spiegazioni.
+3. Se un dato non è chiaramente ricavabile, usa null.
+4. Non inventare mai dati.
+5. guests deve essere un intero tra 1 e 30 oppure null.
+6. service può essere soltanto "pranzo", "cena" oppure null.
+7. date deve essere YYYY-MM-DD oppure null.
+8. Interpreta espressioni naturali italiane come:
+   - io e mia moglie = 2 persone
+   - io e mio marito = 2 persone
+   - siamo io, mia moglie e mio figlio = 3 persone
+   - verso sera = cena
+   - a mezzogiorno = pranzo
+9. Se viene indicato un intervallo ambiguo come "questo weekend" senza un giorno preciso, NON scegliere arbitrariamente sabato o domenica: date deve essere null.
+10. Non modificare i valori che il parser deterministico ha già trovato.
+
+Valori già trovati dal parser:
+${JSON.stringify(current)}
+
+Formato esatto:
+{
+  "guests": number | null,
+  "service": "pranzo" | "cena" | null,
+  "date": "YYYY-MM-DD" | null
+}
+            `,
+          },
+
+          {
+            role: "user",
+            content: message,
+          },
+        ],
+      });
+
+    const clean =
+      cleanAIJson(
+        response.output_text
+      );
+
+    const aiResult =
+      JSON.parse(
+        clean
+      ) as AIParsedBookingRequest;
+
+    let aiGuests:
+      number | null =
+        null;
+
+    if (
+      typeof aiResult.guests ===
+        "number" &&
+      Number.isInteger(
+        aiResult.guests
+      ) &&
+      aiResult.guests >= 1 &&
+      aiResult.guests <= 30
+    ) {
+      aiGuests =
+        aiResult.guests;
+    }
+
+    let aiService:
+      Service | null =
+        null;
+
+    if (
+      aiResult.service ===
+        "pranzo" ||
+      aiResult.service ===
+        "cena"
+    ) {
+      aiService =
+        aiResult.service;
+    }
+
+    let aiDate:
+      string | null =
+        null;
+
+    if (
+      isValidDateString(
+        aiResult.date
+      )
+    ) {
+      aiDate =
+        aiResult.date;
+    }
+
+    /*
+     * I dati deterministici
+     * hanno sempre la precedenza.
+     */
+    return {
+      guests:
+        current.guests ??
+        aiGuests,
+
+      service:
+        current.service ??
+        aiService,
+
+      date:
+        current.date ??
+        aiDate,
+    };
+  } catch (error) {
+    /*
+     * Se OpenAI non risponde,
+     * restituisce JSON non valido
+     * o c'è qualsiasi problema,
+     * il sistema continua usando
+     * il parser normale.
+     */
+
+    console.error(
+      "Fallback AI booking-link:",
+      error
+    );
+
+    return current;
+  }
+}
+
 export async function POST(
   request: Request
 ) {
@@ -631,8 +844,38 @@ export async function POST(
       );
     }
 
-    const parsed =
+    /*
+     * PRIMA:
+     * parser rapido e gratuito.
+     */
+    const deterministic =
       parseMessage(message);
+
+    /*
+     * DOPO:
+     * AI solo se manca
+     * almeno un'informazione.
+     */
+    const parsed =
+      await enrichWithAI(
+        message,
+        deterministic
+      );
+
+    const usedAI =
+      (
+        !deterministic.guests ||
+        !deterministic.service ||
+        !deterministic.date
+      ) &&
+      (
+        parsed.guests !==
+          deterministic.guests ||
+        parsed.service !==
+          deterministic.service ||
+        parsed.date !==
+          deterministic.date
+      );
 
     const missing: string[] =
       [];
@@ -666,6 +909,11 @@ export async function POST(
         parsed,
 
         missing,
+
+        parser:
+          usedAI
+            ? "ai_fallback"
+            : "deterministic",
 
         message:
           `Mi manca: ${missing.join(
@@ -708,6 +956,11 @@ export async function POST(
         complete: true,
 
         parsed,
+
+        parser:
+          usedAI
+            ? "ai_fallback"
+            : "deterministic",
 
         bookingUrl,
 
